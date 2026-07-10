@@ -6,24 +6,33 @@ the phone.
 
 ## The rules it enforces
 
-Every day, six commitments. Miss one and the count returns to Day One — the app checks
-every past day and calls it.
+The official 75 Hard rules, checked every day. Miss one and the count returns to
+Day One — the app checks every past day and calls it.
 
-1. **First workout** — 45 minutes, proof photo required
-2. **Second workout** — 45 minutes outdoors, proof photo required
-3. **One gallon of water** — logged ounce by ounce with a tracker
-4. **Read ten pages** — non-fiction, with a photo of the pages and a book tracker
-5. **Hold the diet** — no alcohol, no slips
-6. **Progress photo** — every day, collected into a timeline
+1. **Follow a structured diet** geared toward your goals — zero deviations, zero
+   alcohol. Name your diet (Keto, Paleo, your own) and it appears on the daily card.
+2. **Two 45-minute workouts**, at least 3 hours apart, one outdoors — proof photo
+   required for each.
+3. **One gallon of water** — logged ounce by ounce with a tracker.
+4. **Read ten pages** — non-fiction, physical pages (audiobooks don't count), with a
+   photo of the pages and a full book tracker.
+5. **Progress picture** — every day, collected into a timeline.
 
-House rule: **ten cheat-meal passes** per attempt for genuine occasions (a wedding, a
-birthday). Each one is logged with its occasion and shown as spent.
+Optional house rule: **cheat-meal passes** for genuine occasions (a wedding, a
+birthday) — configurable as none (official), 5, or 10 per attempt. Each one is logged
+with its occasion and shown as spent.
 
 ## Features
 
 - **Proof or it didn't happen** — workouts and reading can't be checked off until a
   photo/screenshot is attached (can be relaxed in settings). Photos are compressed and
   stored on-device in IndexedDB.
+- **Calorie tracker** — a personal daily calorie target computed from a short
+  questionnaire (sex, age, height, weight, activity, goal — Mifflin–St Jeor), and a
+  per-day food log with meals and calories on the diet card.
+- **The change** — day-by-day progress pictures build into a before/after comparison
+  and a full-screen time-lapse reel of your transformation, shown on the Journey
+  screen and again when you finish all 75 days.
 - **The failure engine** — open the app after an unfinished day and it confronts you:
   back to Day One. Yesterday can be retro-completed honestly (proofs still required);
   anything older cannot.

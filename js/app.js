@@ -5,12 +5,20 @@
 /* ───────────────────────── Tasks ───────────────────────── */
 
 const TASKS = [
-  { id: 'workout1', title: 'First Workout', sub: '45 minutes. Give it everything.', proof: true, icon: 'dumbbell' },
-  { id: 'workout2', title: 'Second Workout', sub: '45 minutes, outdoors — whatever the weather.', proof: true, icon: 'sun' },
+  { id: 'workout1', title: 'First Workout', sub: '45 minutes — the first of two, at least 3 hours apart.', proof: true, icon: 'dumbbell' },
+  { id: 'workout2', title: 'Second Workout', sub: '45 minutes outdoors — whatever the weather.', proof: true, icon: 'sun' },
   { id: 'water', title: 'One Gallon of Water', sub: '', proof: false, icon: 'drop', type: 'water' },
-  { id: 'read', title: 'Read Ten Pages', sub: 'Non-fiction. Real pages — no audiobooks.', proof: true, icon: 'book', type: 'read' },
-  { id: 'diet', title: 'Hold the Diet', sub: 'No alcohol. No slips.', proof: false, icon: 'fork', type: 'diet' },
-  { id: 'photo', title: 'Progress Photo', sub: 'One photo, every single day.', proof: true, icon: 'camera', type: 'photo' },
+  { id: 'read', title: 'Read Ten Pages', sub: 'Non-fiction only. Physical pages — audiobooks don’t count.', proof: true, icon: 'book', type: 'read' },
+  { id: 'diet', title: 'Hold the Diet', sub: 'Zero alcohol. Zero deviations.', proof: false, icon: 'fork', type: 'diet' },
+  { id: 'photo', title: 'Progress Picture', sub: 'Same spot, same light — your future self will thank you.', proof: true, icon: 'camera', type: 'photo' },
+];
+
+const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+const ACTIVITIES = [
+  ['sedentary', 'Mostly seated', 1.2],
+  ['light', 'Lightly active', 1.375],
+  ['moderate', 'Active most days', 1.55],
+  ['very', 'Hard training daily', 1.725],
 ];
 
 const STORE_KEY = '75hard.v1';
@@ -75,34 +83,40 @@ function icon(name, cls = '') {
 /* ───────────────────────── State ───────────────────────── */
 
 function blankPerson() {
-  return { checks: {}, proofs: {}, water: 0, pages: 0, cheat: null };
+  return { checks: {}, proofs: {}, water: 0, pages: 0, cheat: null, food: [] };
 }
 
 function defaultState() {
   return {
     v: 1,
     onboarded: false,
-    profile: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together' },
+    profile: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', dietName: '' },
     attempt: { n: 1, startDate: todayStr(), status: 'active' },
     history: [],
     days: {},
     books: [],
     currentBookId: null,
     cheat: { allowance: 10, used: [] },
-    settings: { strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false },
+    settings: { strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false, nutrition: null },
   };
 }
 
 let S = loadState();
 
 function loadState() {
+  const def = defaultState();
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    return Object.assign(defaultState(), parsed);
+    if (!raw) return def;
+    const p = JSON.parse(raw);
+    const s = Object.assign({}, def, p);
+    s.profile = Object.assign({}, def.profile, p.profile);
+    s.attempt = Object.assign({}, def.attempt, p.attempt);
+    s.cheat = Object.assign({}, def.cheat, p.cheat);
+    s.settings = Object.assign({}, def.settings, p.settings);
+    return s;
   } catch {
-    return defaultState();
+    return def;
   }
 }
 
@@ -120,9 +134,11 @@ const UI = {
   sheet: null,       // { type, ...props }
   fixing: null,      // date being retro-completed
   obStep: 0,
-  ob: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', startOpt: 'today' },
+  ob: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', startOpt: 'today', dietName: '' },
   lastToday: todayStr(),
   galleryFor: null,
+  foodMeal: 0,
+  nutriDraft: null,
 };
 
 const proofURLs = new Map();
@@ -135,10 +151,17 @@ const startDate = () => S.attempt.startDate;
 const dayNumberOf = date => diffDays(startDate(), date) + 1;
 const currentDayN = () => dayNumberOf(todayStr());
 
+function normalizePerson(p) {
+  if (!p.food) p.food = [];
+  return p;
+}
+
 function ensureDay(date) {
   if (!S.days[date]) S.days[date] = { me: blankPerson() };
   if (isCouple() && !S.days[date].partner) S.days[date].partner = blankPerson();
   if (!S.days[date].me) S.days[date].me = blankPerson();
+  normalizePerson(S.days[date].me);
+  if (S.days[date].partner) normalizePerson(S.days[date].partner);
   return S.days[date];
 }
 
@@ -189,6 +212,21 @@ function cheatRemaining(who) {
 
 function currentBook() {
   return S.books.find(b => b.id === S.currentBookId) || null;
+}
+
+/* Nutrition — Mifflin–St Jeor estimate */
+function kcalEaten(p) {
+  return (p.food || []).reduce((a, f) => a + (Number(f.kcal) || 0), 0);
+}
+function kcalTarget() {
+  const n = S.settings.nutrition;
+  return n && n.targetKcal ? n.targetKcal : null;
+}
+function computeTargetKcal(n) {
+  const bmr = 10 * n.kg + 6.25 * n.cm - 5 * n.age + (n.sex === 'male' ? 5 : -161);
+  const act = ACTIVITIES.find(a => a[0] === n.activity);
+  const adj = { lose: -500, maintain: 0, gain: 300 }[n.goal] || 0;
+  return Math.max(1200, Math.round((bmr * (act ? act[2] : 1.375) + adj) / 10) * 10);
 }
 
 function doneCount(date, who) {
@@ -387,7 +425,7 @@ function renderOnboarding() {
       <ul class="ob-rules">
         ${TASKS.map(t => `<li>${icon(t.icon)}<span>${t.title}</span></li>`).join('')}
       </ul>
-      <p class="ob-fine">Ten cheat-meal passes are granted for life's true occasions. Everything else is non-negotiable.</p>
+      <p class="ob-fine">House rule, if you want it: a few cheat-meal passes for life's true occasions. Or run it official — zero. Everything else is non-negotiable.</p>
       <button class="btn primary" data-action="obNext">Begin</button>
     </div>`);
 
@@ -437,9 +475,28 @@ function renderOnboarding() {
       </div>
     </div>`);
 
+  const target = kcalTarget();
   steps.push(`
     <div class="ob-step">
       <div class="kicker">Step three</div>
+      <h2 class="serif ob-h2">Fuel</h2>
+      <p class="ob-lede">Rule one: a structured diet geared toward your goals, held for seventy-five days. Name it — then let the app size your plate.</p>
+      <input class="input big" id="obDiet" type="text" placeholder="Your diet — Keto, Paleo, your own" autocomplete="off" value="${esc(ob.dietName)}" maxlength="30">
+      ${target ? `
+        <div class="commit-card slim">
+          <div class="kicker">Daily target</div>
+          <div class="commit-sig serif">${target.toLocaleString()} kcal</div>
+        </div>` : ''}
+      <button class="btn ghost" data-action="openNutrition">${target ? 'Recalculate my calories' : 'Calculate my daily calories'}</button>
+      <div class="ob-actions">
+        <button class="btn ghost" data-action="obBack">Back</button>
+        <button class="btn primary" data-action="obNext">Continue</button>
+      </div>
+    </div>`);
+
+  steps.push(`
+    <div class="ob-step">
+      <div class="kicker">Step four</div>
       <h2 class="serif ob-h2">Day One</h2>
       <div class="seg">
         <button class="seg-opt ${ob.startOpt === 'today' ? 'on' : ''}" data-action="obStart" data-start="today">Today</button>
@@ -459,6 +516,7 @@ function renderOnboarding() {
     <div class="ob">
       ${steps[UI.obStep]}
       <div class="dots">${steps.map((_, i) => `<span class="${i === UI.obStep ? 'on' : ''}"></span>`).join('')}</div>
+      ${UI.sheet ? renderSheet() : ''}
     </div>`;
 }
 
@@ -634,17 +692,34 @@ function renderTaskRow(date, me, t) {
   }
 
   if (t.type === 'diet') {
+    const target = kcalTarget();
+    const eaten = kcalEaten(me);
+    let cheatBit = '';
     if (me.cheat) {
-      extra = `
+      cheatBit = `
         <button class="cheat-badge" data-action="sheet" data-sheet="cheatDetail" data-date="${date}">
           Cheat pass used — ${esc(me.cheat.occasion || 'special occasion')}
         </button>`;
-    } else if (!isDone) {
-      extra = `
+    } else if (!isDone && cheatRemaining('me') > 0) {
+      cheatBit = `
         <button class="cheat-link" data-action="sheet" data-sheet="cheat" data-date="${date}">
           A true occasion? Use one of your ${cheatRemaining('me')} passes
         </button>`;
     }
+    extra = `
+      <div class="food-wrap">
+        ${target ? `
+          <div class="bar"><div class="bar-fill ${eaten > target ? 'over' : ''}" style="width:${Math.min(100, (eaten / target) * 100).toFixed(1)}%"></div></div>
+          <div class="water-row">
+            <span class="water-count">${eaten.toLocaleString()} <small>/ ${target.toLocaleString()} kcal</small></span>
+            <button class="chip" data-action="sheet" data-sheet="food" data-date="${date}">Log food</button>
+          </div>` : `
+          <div class="water-row">
+            <button class="book-chip empty" data-action="openNutrition">${icon('plus')} <span>Set your daily calories</span></button>
+            <button class="chip" data-action="sheet" data-sheet="food" data-date="${date}">Log food</button>
+          </div>`}
+        ${cheatBit}
+      </div>`;
   }
 
   if (t.proof) {
@@ -659,9 +734,14 @@ function renderTaskRow(date, me, t) {
     }
   }
 
-  const subline = t.type === 'water'
-    ? `${S.settings.waterGoalOz} oz across the day — about ${(S.settings.waterGoalOz * 0.0296).toFixed(1)} litres.`
-    : t.sub;
+  let subline = t.sub;
+  if (t.type === 'water') {
+    subline = `${S.settings.waterGoalOz} oz across the day — about ${(S.settings.waterGoalOz * 0.0296).toFixed(1)} litres.`;
+  } else if (t.type === 'diet') {
+    subline = S.profile.dietName
+      ? `Your ${esc(S.profile.dietName)} plan — zero alcohol, zero deviations.`
+      : 'Your structured diet — zero alcohol, zero deviations.';
+  }
 
   return `
     <li class="card task ${isDone ? 'done' : ''}">
@@ -715,12 +795,13 @@ function renderJourney() {
       <div class="stat"><div class="stat-v serif">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
       <div class="stat"><div class="stat-v serif">${totalPages}</div><div class="stat-l">Pages read</div></div>
     </div>
+    <div class="card" id="transformBox" hidden></div>
     <div class="card">
       <div class="card-head">
-        <strong>Progress photos</strong>
+        <strong>Progress pictures</strong>
         <span class="muted small">Day by day</span>
       </div>
-      <div class="strip" id="photoStrip"><span class="muted small strip-empty">Your daily photos will line up here.</span></div>
+      <div class="strip" id="photoStrip"><span class="muted small strip-empty">Your daily pictures will line up here.</span></div>
     </div>
     ${S.history.length ? `
       <div class="card">
@@ -873,17 +954,36 @@ function renderMore() {
     </div>
 
     <div class="card">
-      <div class="card-head"><strong>Cheat-meal passes</strong><span class="badge-gold">${cheatRemaining('me')} left</span></div>
-      <div class="pass-dots">${Array.from({ length: S.cheat.allowance }, (_, i) =>
-        `<span class="pass-dot ${i < usedList.length ? 'used' : ''}"></span>`).join('')}</div>
-      ${usedList.length ? `
-        <ul class="list">
-          ${usedList.map(u => `
-            <li class="row">
-              <div><strong>${esc(u.occasion || 'Special occasion')}</strong>
-              <div class="muted small">${shortDate(u.date)}</div></div>
-            </li>`).join('')}
-        </ul>` : `<p class="muted small">None used. Save them for the moments that matter — a wedding, a birthday, an anniversary.</p>`}
+      <div class="card-head"><strong>Nutrition</strong>${kcalTarget() ? `<span class="badge-gold">${kcalTarget().toLocaleString()} kcal/day</span>` : ''}</div>
+      <div class="field"><label>Your diet</label>
+        <input class="input" type="text" data-field="dietName" placeholder="Keto, Paleo, your own…" value="${esc(S.profile.dietName)}" maxlength="30">
+      </div>
+      <p class="muted small">${kcalTarget()
+        ? 'Your daily target feeds the food log on the Today screen.'
+        : 'Answer a few questions and the app computes the calories your goal needs.'}</p>
+      <button class="btn ghost wide" data-action="openNutrition">${kcalTarget() ? 'Recalculate my calories' : 'Set up my daily calories'}</button>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><strong>Cheat-meal passes</strong>${S.cheat.allowance > 0 ? `<span class="badge-gold">${cheatRemaining('me')} left</span>` : ''}</div>
+      <div class="row-setting">
+        <div><strong>Passes per attempt</strong><div class="muted small">Official 75 Hard allows none. Your challenge, your call.</div></div>
+        <div class="seg tight">
+          ${[0, 5, 10].map(v => `<button class="seg-opt ${S.cheat.allowance === v ? 'on' : ''}" data-action="setCheatAllowance" data-v="${v}">${v === 0 ? 'None' : v}</button>`).join('')}
+        </div>
+      </div>
+      ${S.cheat.allowance > 0 ? `
+        <div class="pass-dots">${Array.from({ length: S.cheat.allowance }, (_, i) =>
+          `<span class="pass-dot ${i < usedList.length ? 'used' : ''}"></span>`).join('')}</div>
+        ${usedList.length ? `
+          <ul class="list">
+            ${usedList.map(u => `
+              <li class="row">
+                <div><strong>${esc(u.occasion || 'Special occasion')}</strong>
+                <div class="muted small">${shortDate(u.date)}</div></div>
+              </li>`).join('')}
+          </ul>` : `<p class="muted small">None used. Save them for the moments that matter — a wedding, a birthday, an anniversary.</p>`}` : `
+        <p class="muted small">Official mode. The diet stands, all seventy-five days.</p>`}
     </div>
 
     <div class="card">
@@ -907,16 +1007,18 @@ function renderMore() {
     </div>
 
     <div class="card">
-      <div class="card-head"><strong>The commitments</strong></div>
+      <div class="card-head"><strong>The rules of 75 Hard</strong></div>
       <ol class="rules-list">
-        <li>Two 45-minute workouts a day — one of them outdoors.</li>
-        <li>Drink one gallon of water.</li>
-        <li>Read ten pages of a non-fiction book.</li>
-        <li>Follow your chosen diet. No alcohol.</li>
-        <li>Take a progress photo, every day.</li>
-        <li>Miss any item, any day — return to Day One.</li>
+        <li><strong>Follow a structured diet</strong> geared toward your goals — zero deviations, zero excuses, zero alcohol.</li>
+        <li><strong>Two 45-minute workouts</strong> a day, at least 3 hours apart — one of them must be outside, whatever the weather.</li>
+        <li><strong>Drink a gallon of water</strong>, every day.</li>
+        <li><strong>Read 10 pages</strong> of non-fiction that improves your life — physical pages, audiobooks don't count.</li>
+        <li><strong>Take a progress picture</strong>, every day. Every detail matters.</li>
+        <li>Miss any task, any day — <strong>return to Day One.</strong></li>
       </ol>
-      <p class="muted small">House rule: ten cheat-meal passes for genuine occasions across the seventy-five days. Use them like they're gold, because they are.</p>
+      <p class="muted small">${S.cheat.allowance > 0
+        ? `House rule in effect: ${S.cheat.allowance} cheat-meal passes for genuine occasions. Use them like they're gold, because they are.`
+        : 'Running official — no cheat meals, no passes, no exceptions.'}</p>
     </div>
 
     <div class="card">
@@ -982,6 +1084,7 @@ function renderVictory() {
         <h1 class="serif win-num">75</h1>
         <h2 class="serif">Done. All of it.</h2>
         <p class="overlay-lede">Seventy-five days, ${150 * 45 / 60} hours of training, a gallon a day, ${totalPages} pages read${passes ? `, and ${passes} pass${passes === 1 ? '' : 'es'} spent well` : ''}. You are not the person who started this.</p>
+        <div class="card win-transform" id="transformBox" hidden></div>
         <button class="btn primary wide" data-action="shareWin">${icon('share')} Tell the world</button>
         <button class="btn ghost wide" data-action="newChallenge">Begin another 75</button>
         <button class="btn ghost wide dim" data-action="browseAfterWin">Just let me look around</button>
@@ -1053,6 +1156,74 @@ function renderSheet() {
       <button class="btn ghost wide" data-action="closeSheet">Close</button>`;
   }
 
+  if (sh.type === 'food') {
+    const day = ensureDay(sh.date);
+    const me = day.me;
+    const target = kcalTarget();
+    const eaten = kcalEaten(me);
+    inner = `
+      <div class="sheet-title serif">Food log</div>
+      <p class="muted small">${prettyDate(sh.date)}${target ? ` · ${eaten > target ? `${(eaten - target).toLocaleString()} kcal over` : `${(target - eaten).toLocaleString()} kcal left`}` : ''}</p>
+      ${target ? `<div class="bar"><div class="bar-fill ${eaten > target ? 'over' : ''}" style="width:${Math.min(100, (eaten / target) * 100).toFixed(1)}%"></div></div>
+        <div class="food-total"><span>${eaten.toLocaleString()} kcal</span><span class="muted small">target ${target.toLocaleString()}</span></div>` : ''}
+      ${me.food.length ? `
+        <ul class="food-list">
+          ${me.food.map(f => `
+            <li class="food-row">
+              <div><strong>${esc(f.name)}</strong><div class="muted small">${esc(f.meal)}</div></div>
+              <span class="food-kcal">${(Number(f.kcal) || 0).toLocaleString()}</span>
+              <button class="iconbtn" data-action="delFood" data-date="${esc(sh.date)}" data-id="${esc(f.id)}" aria-label="Remove">${icon('close')}</button>
+            </li>`).join('')}
+        </ul>` : `<p class="muted small">Nothing on the plate yet.</p>`}
+      <div class="food-form">
+        <input class="input" id="foodName" type="text" placeholder="What did you eat?" maxlength="40" autocomplete="off">
+        <input class="input" id="foodKcal" type="number" inputmode="numeric" placeholder="kcal" min="0" max="5000">
+      </div>
+      <div class="seg" id="foodMealSeg">
+        ${MEALS.map((m, i) => `<button class="seg-opt ${i === (UI.foodMeal || 0) ? 'on' : ''}" data-action="foodMeal" data-i="${i}">${m}</button>`).join('')}
+      </div>
+      <button class="btn primary wide" data-action="addFood" data-date="${esc(sh.date)}">Add to the log</button>
+      ${!target ? `<button class="btn ghost wide" data-action="openNutrition">Calculate my daily calories</button>` : ''}
+      <button class="btn ghost wide" data-action="closeSheet">Done</button>`;
+  }
+
+  if (sh.type === 'nutrition') {
+    const d = UI.nutriDraft;
+    inner = `
+      <div class="sheet-title serif">Your numbers</div>
+      <p class="muted small">A Mifflin–St Jeor estimate of your daily calories. Tune it later to how your body responds.</p>
+      <div class="seg">
+        ${[['male', 'Male'], ['female', 'Female']].map(([k, l]) =>
+          `<button class="seg-opt ${d.sex === k ? 'on' : ''}" data-action="nutriSet" data-k="sex" data-v="${k}">${l}</button>`).join('')}
+      </div>
+      <div class="duo tight">
+        <input class="input" data-nfield="age" type="number" inputmode="numeric" placeholder="Age" min="10" max="100" value="${esc(d.age)}">
+        ${d.unit === 'imperial'
+          ? `<input class="input" data-nfield="lbs" type="number" inputmode="decimal" placeholder="Weight (lb)" value="${esc(d.lbs)}">`
+          : `<input class="input" data-nfield="kg" type="number" inputmode="decimal" placeholder="Weight (kg)" value="${esc(d.kg)}">`}
+      </div>
+      ${d.unit === 'imperial' ? `
+        <div class="duo tight">
+          <input class="input" data-nfield="ft" type="number" inputmode="numeric" placeholder="Height (ft)" value="${esc(d.ft)}">
+          <input class="input" data-nfield="inch" type="number" inputmode="numeric" placeholder="Height (in)" value="${esc(d.inch)}">
+        </div>` : `
+        <input class="input" data-nfield="cm" type="number" inputmode="numeric" placeholder="Height (cm)" value="${esc(d.cm)}">`}
+      <button class="cheat-link" data-action="nutriUnit">${d.unit === 'imperial' ? 'Switch to metric' : 'Switch to feet & pounds'}</button>
+      <div class="field"><label>How active are you?</label>
+        <div class="rule-pick">
+          ${ACTIVITIES.map(([k, l]) => `<button class="rule-opt slim ${d.activity === k ? 'on' : ''}" data-action="nutriSet" data-k="activity" data-v="${k}"><strong>${l}</strong></button>`).join('')}
+        </div>
+      </div>
+      <div class="field"><label>Goal</label>
+        <div class="seg">
+          ${[['lose', 'Lose fat'], ['maintain', 'Maintain'], ['gain', 'Build']].map(([k, l]) =>
+            `<button class="seg-opt ${d.goal === k ? 'on' : ''}" data-action="nutriSet" data-k="goal" data-v="${k}">${l}</button>`).join('')}
+        </div>
+      </div>
+      <button class="btn primary wide" data-action="saveNutrition">Calculate &amp; save</button>
+      <button class="btn ghost wide" data-action="closeSheet">Cancel</button>`;
+  }
+
   if (sh.type === 'confirm') {
     inner = `
       <div class="sheet-title serif">${esc(sh.title)}</div>
@@ -1081,30 +1252,68 @@ function renderSheet() {
 
 /* ───────────────────────── Async hydration ───────────────────────── */
 
-function hydrateProofImages() {
-  document.querySelectorAll('img[data-proof-src]').forEach(img => {
-    const id = img.getAttribute('data-proof-src');
-    proofURL(id).then(url => { if (url) img.src = url; });
+function fillProofImgs(root) {
+  root.querySelectorAll('img[data-proof-src]').forEach(img => {
+    proofURL(img.getAttribute('data-proof-src')).then(url => { if (url) img.src = url; });
   });
-  const strip = $('#photoStrip');
-  if (strip) hydrateGallery(strip);
 }
 
-function hydrateGallery(strip) {
-  DB.allProofs().then(all => {
-    const photos = all
-      .filter(r => r.taskId === 'photo' && r.who === 'me' && r.attempt === S.attempt.n)
-      .sort((a, b) => a.date < b.date ? -1 : 1);
-    if (!photos.length) return;
-    strip.innerHTML = photos.map(r => `
-      <button class="strip-item" data-action="viewProof" data-date="${esc(r.date)}" data-task="photo">
-        <img data-proof-src="${esc(r.id)}" alt="">
-        <span>Day ${dayNumberOf(r.date)}</span>
-      </button>`).join('');
-    strip.querySelectorAll('img[data-proof-src]').forEach(img => {
-      proofURL(img.getAttribute('data-proof-src')).then(url => { if (url) img.src = url; });
-    });
+function hydrateProofImages() {
+  fillProofImgs(document);
+  if ($('#photoStrip') || $('#transformBox')) hydrateGallery();
+}
+
+function myPhotos() {
+  return DB.allProofs().then(all => all
+    .filter(r => r.taskId === 'photo' && r.who === 'me' && r.attempt === S.attempt.n)
+    .sort((a, b) => a.date < b.date ? -1 : 1));
+}
+
+function hydrateGallery() {
+  myPhotos().then(photos => {
+    const strip = $('#photoStrip');
+    if (strip && photos.length) {
+      strip.innerHTML = photos.map(r => `
+        <button class="strip-item" data-action="viewProof" data-date="${esc(r.date)}" data-task="photo">
+          <img data-proof-src="${esc(r.id)}" alt="">
+          <span>Day ${dayNumberOf(r.date)}</span>
+        </button>`).join('');
+      fillProofImgs(strip);
+    }
+    const tf = $('#transformBox');
+    if (tf && photos.length >= 2) {
+      const a = photos[0], b = photos[photos.length - 1];
+      tf.hidden = false;
+      tf.innerHTML = `
+        <div class="card-head"><strong>The change</strong><span class="muted small">${photos.length} pictures</span></div>
+        <div class="transform">
+          <figure><img data-proof-src="${esc(a.id)}" alt=""><figcaption>Day ${dayNumberOf(a.date)}</figcaption></figure>
+          <figure><img data-proof-src="${esc(b.id)}" alt=""><figcaption>Day ${dayNumberOf(b.date)}</figcaption></figure>
+        </div>
+        <button class="btn ghost wide" data-action="playLapse">Play the reel</button>`;
+      fillProofImgs(tf);
+    }
   });
+}
+
+/* Full-screen time-lapse of progress pictures */
+function openTimelapse(photos) {
+  const ov = document.createElement('div');
+  ov.className = 'lapse';
+  ov.innerHTML = `<img alt=""><div class="lapse-label serif"></div><div class="lapse-hint">Tap anywhere to close</div>`;
+  document.body.appendChild(ov);
+  const img = ov.querySelector('img');
+  const label = ov.querySelector('.lapse-label');
+  let i = 0;
+  const step = () => {
+    const p = photos[i % photos.length];
+    proofURL(p.id).then(url => { if (url) img.src = url; });
+    label.textContent = `Day ${dayNumberOf(p.date)}`;
+    i++;
+  };
+  step();
+  const timer = setInterval(step, 700);
+  ov.addEventListener('click', () => { clearInterval(timer); ov.remove(); });
 }
 
 /* ───────────────────────── Countdown ───────────────────────── */
@@ -1255,12 +1464,18 @@ const ACTIONS = {
         UI.ob.partnerName = v.trim();
       }
     }
+    if (UI.obStep === 3) {
+      const v = $('#obDiet'); if (v) UI.ob.dietName = v.value.trim();
+    }
     UI.obStep++;
     renderApp();
   },
   obBack() {
     if (UI.obStep === 2) {
       const p = $('#obPartner'); if (p) UI.ob.partnerName = p.value.trim();
+    }
+    if (UI.obStep === 3) {
+      const v = $('#obDiet'); if (v) UI.ob.dietName = v.value.trim();
     }
     UI.obStep = Math.max(0, UI.obStep - 1);
     renderApp();
@@ -1280,6 +1495,7 @@ const ACTIONS = {
     S.profile.mode = ob.mode;
     S.profile.partnerName = ob.mode === 'couple' ? ob.partnerName : '';
     S.profile.coupleRule = ob.coupleRule;
+    S.profile.dietName = ob.dietName;
     S.attempt = {
       n: 1,
       startDate: ob.startOpt === 'tomorrow' ? addDays(todayStr(), 1) : todayStr(),
@@ -1385,6 +1601,99 @@ const ACTIONS = {
     save();
     evaluateAndRender();
     showToast('Pass returned.');
+  },
+
+  /* food log */
+  foodMeal(d, el) {
+    UI.foodMeal = Number(d.i) || 0;
+    const seg = $('#foodMealSeg');
+    if (seg) seg.querySelectorAll('.seg-opt').forEach((b, i) => b.classList.toggle('on', i === UI.foodMeal));
+  },
+  addFood(d) {
+    const name = (($('#foodName') || {}).value || '').trim();
+    const kcal = parseInt(($('#foodKcal') || {}).value, 10);
+    if (!name) { showToast('What was it?'); return; }
+    if (!(kcal >= 0)) { showToast('Add the calories.'); return; }
+    const day = ensureDay(d.date);
+    day.me.food.push({ id: uid(), name, kcal: Math.min(5000, kcal), meal: MEALS[UI.foodMeal || 0] });
+    save();
+    renderApp();
+  },
+  delFood(d) {
+    const day = ensureDay(d.date);
+    const i = day.me.food.findIndex(f => f.id === d.id);
+    if (i >= 0) day.me.food.splice(i, 1);
+    save();
+    renderApp();
+  },
+
+  /* nutrition calculator */
+  openNutrition() {
+    const ob = $('#obDiet');
+    if (ob) UI.ob.dietName = ob.value.trim();
+    if (!UI.nutriDraft) {
+      const n = S.settings.nutrition;
+      if (n) {
+        const totalIn = n.cm / 2.54;
+        UI.nutriDraft = {
+          sex: n.sex, age: n.age, activity: n.activity, goal: n.goal, unit: 'imperial',
+          ft: Math.floor(totalIn / 12), inch: Math.round(totalIn % 12),
+          lbs: Math.round(n.kg / 0.45359), cm: Math.round(n.cm), kg: Math.round(n.kg),
+        };
+      } else {
+        UI.nutriDraft = { sex: 'male', age: '', ft: '', inch: '', lbs: '', cm: '', kg: '', unit: 'imperial', activity: 'light', goal: 'maintain' };
+      }
+    }
+    UI.sheet = { type: 'nutrition' };
+    renderApp();
+  },
+  nutriSet(d) {
+    UI.nutriDraft[d.k] = d.v;
+    renderApp();
+  },
+  nutriUnit() {
+    const d = UI.nutriDraft;
+    if (d.unit === 'imperial') {
+      d.unit = 'metric';
+      if (d.ft || d.inch) d.cm = Math.round((Number(d.ft) || 0) * 30.48 + (Number(d.inch) || 0) * 2.54);
+      if (d.lbs) d.kg = Math.round(Number(d.lbs) * 0.45359);
+    } else {
+      d.unit = 'imperial';
+      if (d.cm) { const t = Number(d.cm) / 2.54; d.ft = Math.floor(t / 12); d.inch = Math.round(t % 12); }
+      if (d.kg) d.lbs = Math.round(Number(d.kg) / 0.45359);
+    }
+    renderApp();
+  },
+  saveNutrition() {
+    const d = UI.nutriDraft;
+    const age = Number(d.age);
+    const cm = d.unit === 'imperial'
+      ? (Number(d.ft) || 0) * 30.48 + (Number(d.inch) || 0) * 2.54
+      : Number(d.cm);
+    const kg = d.unit === 'imperial' ? Number(d.lbs) * 0.45359 : Number(d.kg);
+    if (!(age >= 10 && age <= 100)) { showToast('Check the age.'); return; }
+    if (!(cm >= 90 && cm <= 250)) { showToast('Check the height.'); return; }
+    if (!(kg >= 30 && kg <= 350)) { showToast('Check the weight.'); return; }
+    const n = { sex: d.sex, age, cm: Math.round(cm * 10) / 10, kg: Math.round(kg * 10) / 10, activity: d.activity, goal: d.goal };
+    n.targetKcal = computeTargetKcal(n);
+    S.settings.nutrition = n;
+    UI.sheet = null;
+    save();
+    renderApp();
+    showToast(`Your day: ${n.targetKcal.toLocaleString()} kcal.`);
+  },
+  setCheatAllowance(d) {
+    const v = Number(d.v);
+    if (v < cheatUsed('me')) { showToast(`You've already used ${cheatUsed('me')} this attempt.`); return; }
+    S.cheat.allowance = v;
+    save();
+    renderApp();
+  },
+  playLapse() {
+    myPhotos().then(photos => {
+      if (photos.length < 2) { showToast('Two or more pictures make a reel.'); return; }
+      openTimelapse(photos);
+    });
   },
 
   /* books */
@@ -1562,7 +1871,13 @@ document.addEventListener('change', e => {
   const f = el.dataset.field;
   if (f === 'name') S.profile.name = el.value.trim().slice(0, 30);
   if (f === 'partnerName') S.profile.partnerName = el.value.trim().slice(0, 30);
+  if (f === 'dietName') S.profile.dietName = el.value.trim().slice(0, 30);
   save();
+});
+
+document.addEventListener('input', e => {
+  const el = e.target.closest('[data-nfield]');
+  if (el && UI.nutriDraft) UI.nutriDraft[el.dataset.nfield] = el.value;
 });
 
 /* Day rollover + countdown tick */

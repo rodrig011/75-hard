@@ -86,14 +86,14 @@ function icon(name, cls = '') {
 /* ───────────────────────── State ───────────────────────── */
 
 function blankPerson() {
-  return { checks: {}, proofs: {}, water: 0, pages: 0, cheat: null, food: [] };
+  return { checks: {}, proofs: {}, water: 0, pages: 0, cheat: null, food: [], workouts: {}, note: '' };
 }
 
 function defaultState() {
   return {
     v: 1,
     onboarded: false,
-    profile: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', dietName: '' },
+    profile: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', dietName: '', why: '' },
     attempt: { n: 1, startDate: todayStr(), status: 'active' },
     history: [],
     days: {},
@@ -102,7 +102,15 @@ function defaultState() {
     cheat: { allowance: 10, used: [] },
     myFoods: [],
     foodRecents: [],
-    settings: { strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false, nutrition: null, challengeMode: 'hard' },
+    reflections: [],
+    milestonesSeen: [],
+    lastBackup: null,
+    settings: {
+      strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false,
+      nutrition: null, challengeMode: 'hard', theme: 'system',
+      reminders: { on: false, am: '08:00', pm: '18:30' },
+      bannedWords: '',
+    },
   };
 }
 
@@ -139,7 +147,7 @@ const UI = {
   sheet: null,       // { type, ...props }
   fixing: null,      // date being retro-completed
   obStep: 0,
-  ob: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', startOpt: 'today', dietName: '', challengeMode: 'hard' },
+  ob: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', startOpt: 'today', dietName: '', challengeMode: 'hard', why: '' },
   lastToday: todayStr(),
   galleryFor: null,
   foodMeal: 0,
@@ -164,6 +172,8 @@ const currentDayN = () => dayNumberOf(todayStr());
 
 function normalizePerson(p) {
   if (!p.food) p.food = [];
+  if (!p.workouts) p.workouts = {};
+  if (p.note == null) p.note = '';
   return p;
 }
 
@@ -250,6 +260,93 @@ function computeTargetKcal(n) {
   const act = ACTIVITIES.find(a => a[0] === n.activity);
   const adj = { lose: -500, maintain: 0, gain: 300 }[n.goal] || 0;
   return Math.max(1200, Math.round((bmr * (act ? act[2] : 1.375) + adj) / 10) * 10);
+}
+
+/* ── Diet compliance ── */
+
+const DIET_RULES = {
+  always: ['beer', 'wine', 'vodka', 'whiskey', 'tequila', 'cocktail', 'margarita', 'alcohol'],
+  keto: ['sugar', 'bread', 'bagel', 'rice', 'pasta', 'noodle', 'tortilla', 'donut', 'cake', 'cookie', 'brownie', 'soda', 'juice', 'candy', 'cereal', 'oatmeal', 'granola', 'banana', 'potato', 'fries', 'beans', 'pancake', 'waffle', 'muffin', 'churro', 'ice cream', 'honey', 'syrup', 'horchata'],
+  paleo: ['bread', 'bagel', 'pasta', 'noodle', 'cheese', 'milk', 'yogurt', 'beans', 'lentil', 'rice', 'soda', 'candy', 'donut', 'cereal', 'sugar', 'ice cream', 'peanut'],
+  vegan: ['chicken', 'beef', 'steak', 'pork', 'bacon', 'ham', 'turkey', 'lamb', 'fish', 'salmon', 'tuna', 'shrimp', 'egg', 'milk', 'cheese', 'yogurt', 'butter', 'honey'],
+  vegetarian: ['chicken', 'beef', 'steak', 'pork', 'bacon', 'ham', 'turkey', 'lamb', 'fish', 'salmon', 'tuna', 'shrimp', 'jerky', 'carnitas', 'asada'],
+};
+
+const FOOD_SWAPS = [
+  ['soda', 'Sparkling water or a zero-sugar soda scratches the same itch.'],
+  ['juice', 'Whole fruit gives you the fiber the juice threw away.'],
+  ['fries', 'Roasted potatoes or a baked sweet potato get close.'],
+  ['chips', 'Air-popped popcorn — a tenth of the fat.'],
+  ['candy', 'A couple of dates or a square of dark chocolate.'],
+  ['ice cream', 'Frozen Greek yogurt with berries.'],
+  ['donut', 'A protein muffin keeps the morning on track.'],
+  ['cake', 'Greek yogurt with honey and walnuts.'],
+  ['cookie', 'A protein bar handles the sweet tooth.'],
+  ['pizza', 'A cauliflower-crust slice halves the carbs.'],
+  ['bread', 'Lettuce wraps or keto bread hold everything a slice does.'],
+  ['pasta', 'Zucchini noodles carry the same sauce.'],
+  ['rice', 'Cauliflower rice — a tenth of the carbs.'],
+  ['beer', 'A kombucha or sparkling water with lime. The rules say zero anyway.'],
+  ['wine', 'Alcohol resets the challenge. Sparkling water in a nice glass.'],
+];
+
+function dietProfile() {
+  const d = (S.profile.dietName || '').toLowerCase();
+  if (d.includes('keto') || d.includes('low carb')) return 'keto';
+  if (d.includes('paleo') || d.includes('whole30')) return 'paleo';
+  if (d.includes('vegan')) return 'vegan';
+  if (d.includes('vegetarian')) return 'vegetarian';
+  return null;
+}
+
+function checkDietCompliance(food) {
+  const name = (food.name || '').toLowerCase();
+  const hit = list => list.find(w => name.includes(w));
+  const custom = (S.settings.bannedWords || '').split(',').map(w => w.trim().toLowerCase()).filter(Boolean);
+
+  let word = hit(DIET_RULES.always);
+  if (word) return { flag: true, reason: `Alcohol is a hard rule — zero for all seventy-five days.`, word };
+  word = hit(custom);
+  if (word) return { flag: true, reason: `“${word}” is on your banned list.`, word };
+  const prof = dietProfile();
+  if (prof) {
+    word = hit(DIET_RULES[prof]);
+    if (word) return { flag: true, reason: `“${word}” usually breaks a ${S.profile.dietName} plan.`, word };
+    if (prof === 'keto' && (Number(food.c) || 0) > 15) {
+      return { flag: true, reason: `${Math.round(food.c)}g of carbs in one serving is a lot for ${S.profile.dietName}.`, word: null };
+    }
+  }
+  return { flag: false };
+}
+
+function foodSwapFor(word) {
+  if (!word) return null;
+  const row = FOOD_SWAPS.find(([k]) => word.includes(k) || k.includes(word));
+  return row ? row[1] : null;
+}
+
+/* ── Streak / milestones ── */
+
+function currentChain() {
+  const today = todayStr();
+  let n = dayComplete(today) ? 1 : 0;
+  let d = addDays(today, -1);
+  while (dayNumberOf(d) >= 1 && dayComplete(d)) { n++; d = addDays(d, -1); }
+  return n;
+}
+
+const MILESTONES = [
+  [10, 'Ten days.', 'The habit is forming. Most people never see this number.'],
+  [25, 'Twenty-five.', 'A third of the way. This is starting to look like who you are.'],
+  [50, 'Fifty.', 'The doubters went quiet around day thirty. Twenty-five to go.'],
+];
+
+/* ── Theme ── */
+
+function applyTheme() {
+  const t = S.settings.theme || 'system';
+  if (t === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
 }
 
 function doneCount(date, who) {
@@ -370,10 +467,12 @@ function onFileChosen(e) {
       const old = proofURLs.get(id);
       if (old) { URL.revokeObjectURL(old); proofURLs.delete(id); }
       const day = ensureDay(ctx.date);
+      const wasDone = personDone(day, 'me');
       day[ctx.who].proofs[ctx.taskId] = id;
       save();
       evaluateAndRender();
       showToast(ctx.taskId === 'photo' ? 'Progress photo saved.' : 'Proof attached.');
+      if (ctx.who === 'me' && !wasDone && personDone(day, 'me')) celebrateDay(ctx.date);
     });
   }).catch(() => showToast('Could not read that image.'));
 }
@@ -550,6 +649,7 @@ function renderOnboarding() {
           <span>A missed day is recorded, not punished. The 75 days keep counting.</span>
         </button>
       </div>
+      <textarea class="input" id="obWhy" rows="2" placeholder="Why are you doing this? One honest sentence — you'll see it every day." maxlength="140">${esc(ob.why || '')}</textarea>
       <div class="commit-card">
         <p>“For the next seventy-five days I will keep every commitment on this list, every day, with proof — or I will go back to Day One and begin again.”</p>
         <div class="commit-sig serif">${esc(ob.name || 'Signed')}${ob.mode === 'couple' && ob.partnerName ? ` &amp; ${esc(ob.partnerName)}` : ''}</div>
@@ -663,6 +763,7 @@ function renderToday() {
           <div class="kicker">${prettyDate(editDate)} · Attempt ${roman(S.attempt.n)}</div>
           <h1 class="serif hero-num">Day ${dayN}</h1>
           <div class="muted">${allDone ? 'Everything is done. Sealed.' : `${done} of ${TASKS.length} complete · <span id="countdown">${countdownText()}</span>`}</div>
+          ${currentChain() >= 2 ? `<div class="chain-line">${icon('seal')} ${currentChain()}-day chain — don't break it</div>` : ''}
         </div>
         <div class="ring-wrap" aria-hidden="true">
           <svg class="ring" viewBox="0 0 120 120">
@@ -691,10 +792,15 @@ function renderToday() {
           <p class="muted small">Waiting on ${esc(S.profile.partnerName || 'your partner')} — the day seals when you both finish.</p>
         </div>
       </div>` : ''}
+    ${S.profile.why ? `<div class="why-card"><span class="kicker">Your why</span><p class="serif">“${esc(S.profile.why)}”</p></div>` : ''}
     <ul class="tasklist">
       ${TASKS.map(t => renderTaskRow(editDate, me, t)).join('')}
     </ul>
-    <p class="footnote">Miss a single item and the count returns to zero. The rules are the rules.</p>`;
+    <div class="card journal-card">
+      <div class="card-head"><strong>Tonight's page</strong><span class="muted small">just for you</span></div>
+      <textarea class="input" data-journal="${editDate}" rows="3" placeholder="How did the day actually go?">${esc(me.note || '')}</textarea>
+    </div>
+    <p class="footnote">${isFlex() ? 'A missed day is recorded, never erased. Show up anyway.' : 'Miss a single item and the count returns to zero. The rules are the rules.'}</p>`;
 }
 
 function renderTaskRow(date, me, t) {
@@ -704,6 +810,14 @@ function renderTaskRow(date, me, t) {
 
   let extra = '';
   let side = '';
+
+  if (t.id === 'workout1' || t.id === 'workout2') {
+    const w = me.workouts[t.id];
+    extra = `
+      <button class="book-chip ${w && w.kind ? 'logged' : 'empty'}" data-action="workoutSheet" data-date="${date}" data-task="${t.id}">
+        ${icon('dumbbell')} <span>${w && w.kind ? `${esc(w.kind)} · ${w.mins || 45} min${w.note ? ` — ${esc(w.note)}` : ''}` : 'Log what you did'}</span>
+      </button>`;
+  }
 
   if (t.type === 'water') {
     const goal = S.settings.waterGoalOz;
@@ -855,10 +969,31 @@ function renderJourney() {
     </div>
     <div class="stat-row">
       <div class="stat"><div class="stat-v serif">${sealedDays}</div><div class="stat-l">Days sealed</div></div>
-      <div class="stat"><div class="stat-v serif">${Math.max(0, 75 - Math.min(Math.max(currentDayN(), 0), 75))}</div><div class="stat-l">Days ahead</div></div>
+      <div class="stat"><div class="stat-v serif">${currentChain()}</div><div class="stat-l">Chain</div></div>
       <div class="stat"><div class="stat-v serif">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
       <div class="stat"><div class="stat-v serif">${totalPages}</div><div class="stat-l">Pages read</div></div>
     </div>
+    <div class="card">
+      <div class="card-head"><strong>Milestones</strong></div>
+      <div class="medals">
+        ${[10, 25, 50, 75].map(n => `
+          <div class="medal ${sealedDays >= n ? 'earned' : ''}">
+            <span class="serif">${n}</span>
+            <small>${sealedDays >= n ? 'earned' : 'ahead'}</small>
+          </div>`).join('')}
+      </div>
+    </div>
+    ${S.reflections.length ? `
+      <div class="card">
+        <div class="card-head"><strong>Weekly reflections</strong></div>
+        <ul class="list">
+          ${S.reflections.slice().reverse().map(r => `
+            <li class="row reflect-row">
+              <div><strong>Week ${r.week}</strong>
+              <div class="muted small">${esc(r.text)}</div></div>
+            </li>`).join('')}
+        </ul>
+      </div>` : ''}
     <div class="card" id="transformBox" hidden></div>
     <div class="card">
       <div class="card-head">
@@ -1015,6 +1150,32 @@ function renderMore() {
         <div class="field"><label>Partner's name</label>
           <input class="input" type="text" data-field="partnerName" value="${esc(S.profile.partnerName)}" maxlength="30">
         </div>` : ''}
+      <div class="field"><label>Your why — shown every day</label>
+        <input class="input" type="text" data-field="why" placeholder="One honest sentence" value="${esc(S.profile.why)}" maxlength="140">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><strong>Appearance</strong></div>
+      <div class="seg">
+        ${[['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark'], ['hardcore', 'Hardcore']].map(([v, l]) =>
+          `<button class="seg-opt ${(S.settings.theme || 'system') === v ? 'on' : ''}" data-action="setTheme" data-v="${v}">${l}</button>`).join('')}
+      </div>
+      <p class="muted small" style="margin-top:10px">Hardcore is black and gold. No softness anywhere.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><strong>Reminders</strong></div>
+      <div class="row-setting">
+        <div><strong>Nudge me</strong><div class="muted small">“The second workout is still open.”</div></div>
+        <button class="switch ${S.settings.reminders.on ? 'on' : ''}" data-action="toggleReminders" role="switch" aria-checked="${S.settings.reminders.on}"><i></i></button>
+      </div>
+      ${S.settings.reminders.on ? `
+        <div class="duo tight">
+          <div class="field"><label>Morning</label><input class="input" type="time" data-rtime="am" value="${esc(S.settings.reminders.am)}"></div>
+          <div class="field"><label>Evening</label><input class="input" type="time" data-rtime="pm" value="${esc(S.settings.reminders.pm)}"></div>
+        </div>
+        <p class="muted small">Reminders fire while the app is open or in a tab — iPhones don't let web apps ring on their own. The evening one is the one that saves challenges.</p>` : ''}
     </div>
 
     <div class="card">
@@ -1026,6 +1187,10 @@ function renderMore() {
         ? 'Your daily target feeds the food log on the Today screen.'
         : 'Answer a few questions and the app computes the calories your goal needs.'}</p>
       <button class="btn ghost wide" data-action="openNutrition">${kcalTarget() ? 'Recalculate my calories' : 'Set up my daily calories'}</button>
+      <div class="field" style="margin-top:12px"><label>Banned foods — warn me when I log these</label>
+        <input class="input" type="text" data-field="bannedWords" placeholder="soda, chips, energy drink" value="${esc(S.settings.bannedWords)}" maxlength="200">
+      </div>
+      <p class="muted small">Alcohol is always flagged. Name a diet above (Keto, Paleo, Vegan…) and the log warns about foods that break it, with a better swap.</p>
     </div>
 
     <div class="card">
@@ -1112,6 +1277,7 @@ function renderMore() {
         <button class="btn ghost" data-action="importData">Import backup</button>
       </div>
       <p class="muted small">Backups carry your log and settings. Proof photos stay on the device they were taken on.</p>
+      <p class="muted small" id="storageStatus">${S.lastBackup ? `Last backup: ${shortDate(S.lastBackup)}.` : 'No backup yet — one tap keeps 75 days safe.'}</p>
     </div>
 
     <div class="card danger-card">
@@ -1136,6 +1302,7 @@ function renderFailOverlay(fail) {
         <ul class="missed-list">
           ${missed.map(t => `<li>${icon(t.icon)}<span>${t.title}</span></li>`).join('')}
         </ul>
+        ${S.profile.why ? `<p class="why-quote serif">You wrote: “${esc(S.profile.why)}”</p>` : ''}
         <p class="overlay-lede muted">Seventy-five means seventy-five. It starts again — and that's not failure, it's practice.</p>
         <button class="btn primary wide" data-action="restartNow">Back to Day One</button>
         ${fail.fixable ? `
@@ -1321,6 +1488,60 @@ function renderSheet() {
       </div>
       <button class="btn primary wide" data-action="saveNutrition">Calculate &amp; save</button>
       <button class="btn ghost wide" data-action="closeSheet">Cancel</button>`;
+  }
+
+  if (sh.type === 'dietWarn') {
+    const pend = UI.pendingFood || {};
+    inner = `
+      <div class="sheet-title serif">Hold on.</div>
+      <p class="muted">${esc(pend.reason || 'This may break your diet.')}</p>
+      ${pend.food ? `<div class="warn-food"><strong>${esc(pend.food.name)}</strong><span class="muted small">${esc(pend.food.serving || '')} · ${Math.round(pend.food.kcal)} kcal</span></div>` : ''}
+      ${pend.swap ? `<p class="swap-tip">${esc(pend.swap)}</p>` : ''}
+      ${cheatRemaining('me') > 0 ? `<p class="muted small">A true occasion? You still hold ${cheatRemaining('me')} cheat pass${cheatRemaining('me') === 1 ? '' : 'es'}.</p>` : ''}
+      <button class="btn primary wide" data-action="skipFood">Skip it — stay clean</button>
+      <button class="btn ghost wide" data-action="logAnyway">Log it anyway</button>`;
+  }
+
+  if (sh.type === 'workoutLog') {
+    const day = ensureDay(sh.date);
+    const w = day.me.workouts[sh.task] || {};
+    const KINDS = ['Lift', 'Run', 'Walk', 'HIIT', 'Yoga', 'Swim', 'Bike', 'Other'];
+    const t = TASKS.find(x => x.id === sh.task);
+    inner = `
+      <div class="sheet-title serif">${t ? t.title : 'Workout'}</div>
+      <p class="muted small">What did you actually do? Future you will want the record.</p>
+      <div class="kind-chips">
+        ${KINDS.map(k => `<button class="chip ${w.kind === k ? 'on' : ''}" data-action="setWorkoutKind" data-date="${esc(sh.date)}" data-task="${esc(sh.task)}" data-k="${k}">${k}</button>`).join('')}
+      </div>
+      <div class="water-row" style="margin:14px 0 6px">
+        <span class="water-count">${w.mins || 45} <small>minutes</small></span>
+        <span class="chips">
+          <button class="chip" data-action="workoutMins" data-date="${esc(sh.date)}" data-task="${esc(sh.task)}" data-d="-5">−5</button>
+          <button class="chip" data-action="workoutMins" data-date="${esc(sh.date)}" data-task="${esc(sh.task)}" data-d="5">+5</button>
+        </span>
+      </div>
+      <input class="input" id="woNote" type="text" placeholder="Notes — 5x5 squats, new PR…" maxlength="80" value="${esc(w.note || '')}">
+      <button class="btn primary wide" data-action="saveWorkout" data-date="${esc(sh.date)}" data-task="${esc(sh.task)}">Save</button>
+      <button class="btn ghost wide" data-action="closeSheet">Close</button>`;
+  }
+
+  if (sh.type === 'milestone') {
+    const m = MILESTONES.find(x => x[0] === sh.n) || [sh.n, `Day ${sh.n}.`, ''];
+    inner = `
+      <div class="milestone-num serif">${m[0]}</div>
+      <div class="sheet-title serif" style="text-align:center">${esc(m[1])}</div>
+      <p class="muted" style="text-align:center">${esc(m[2])}</p>
+      ${S.profile.why ? `<p class="why-quote serif">“${esc(S.profile.why)}”</p>` : ''}
+      <button class="btn primary wide" data-action="closeSheet">Keep going</button>`;
+  }
+
+  if (sh.type === 'reflect') {
+    inner = `
+      <div class="sheet-title serif">Week ${sh.week} — look back</div>
+      <p class="muted small">Seven days sealed. Two minutes of honesty: what worked, what nearly broke you, what changes next week?</p>
+      <textarea class="input" id="reflectText" rows="5" placeholder="This week I…"></textarea>
+      <button class="btn primary wide" data-action="saveReflection" data-week="${Number(sh.week) || 0}">Save the reflection</button>
+      <button class="btn ghost wide" data-action="closeSheet">Not now</button>`;
   }
 
   if (sh.type === 'confirm') {
@@ -1567,6 +1788,8 @@ function applyDayCode(text) {
 /* ───────────────────────── Backup ───────────────────────── */
 
 function exportBackup() {
+  S.lastBackup = todayStr();
+  save();
   const blob = new Blob([JSON.stringify({ app: 'seventyfive', exported: new Date().toISOString(), state: S }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1689,6 +1912,7 @@ const ACTIONS = {
     S.profile.partnerName = ob.mode === 'couple' ? ob.partnerName : '';
     S.profile.coupleRule = ob.coupleRule;
     S.profile.dietName = ob.dietName;
+    S.profile.why = (($('#obWhy') || {}).value || '').trim().slice(0, 140);
     S.settings.challengeMode = ob.challengeMode;
     S.attempt = {
       n: 1,
@@ -1749,6 +1973,7 @@ const ACTIONS = {
 
   pages(d) {
     const day = ensureDay(d.date);
+    const wasDone = personDone(day, 'me');
     setPages(d.date, day.me.pages + Number(d.n));
     save();
     evaluateAndRender();
@@ -1756,6 +1981,7 @@ const ACTIONS = {
     if (book && !book.done && book.pagesRead >= book.totalPages) {
       showToast(`You reached the last page of “${book.title}”.`);
     }
+    if (!wasDone && personDone(day, 'me')) celebrateDay(d.date);
   },
 
   capture(d) { openCapture(d.date, 'me', d.task); },
@@ -1807,16 +2033,21 @@ const ACTIONS = {
     const r = FOOD_RESULTS[Number(d.idx)];
     if (!r) return;
     const date = (UI.sheet && UI.sheet.date) || todayStr();
-    const day = ensureDay(date);
-    day.me.food.push({
-      id: uid(), name: r.name, serving: r.serving, qty: 1,
-      kcal: Math.round(r.kcal), p: r.p || 0, c: r.c || 0, f: r.f || 0,
-      meal: MEALS[UI.foodMeal || 0],
-    });
-    pushRecentFood(r);
-    save();
+    tryLogFood(date, r);
+  },
+  logAnyway() {
+    const pend = UI.pendingFood;
+    UI.pendingFood = null;
+    if (!pend) { UI.sheet = null; renderApp(); return; }
+    UI.sheet = { type: 'food', date: pend.date };
+    doLogFood(pend.date, pend.food);
+  },
+  skipFood() {
+    const pend = UI.pendingFood;
+    UI.pendingFood = null;
+    UI.sheet = pend ? { type: 'food', date: pend.date } : null;
     renderApp();
-    showToast(`${r.name} — logged.`);
+    showToast('Good call.');
   },
   foodQty(d) {
     const day = ensureDay(d.date);
@@ -1850,28 +2081,13 @@ const ACTIONS = {
     };
     S.myFoods.unshift(food);
     if (S.myFoods.length > 200) S.myFoods.pop();
-    const day = ensureDay(d.date);
-    day.me.food.push({ id: uid(), qty: 1, meal: MEALS[UI.foodMeal || 0], ...food });
-    pushRecentFood({ ...food, src: 'mine' });
     UI.foodCustomOpen = false;
     save();
-    renderApp();
-    showToast(`“${name}” saved to your foods.`);
+    tryLogFood(d.date, { ...food, src: 'mine' });
   },
   openScanner() {
     const date = (UI.sheet && UI.sheet.date) || todayStr();
-    Scanner.open(food => {
-      const day = ensureDay(date);
-      day.me.food.push({
-        id: uid(), name: food.name, serving: food.serving, qty: 1,
-        kcal: food.kcal, p: food.p, c: food.c, f: food.f,
-        meal: MEALS[UI.foodMeal || 0],
-      });
-      pushRecentFood(food);
-      save();
-      renderApp();
-      showToast(`${food.name} — logged.`);
-    }, showToast);
+    Scanner.open(food => tryLogFood(date, food), showToast);
   },
   lookupCode() {
     const q = (UI.foodQuery || '').trim();
@@ -1954,6 +2170,62 @@ const ACTIONS = {
     save();
     renderApp();
     showToast(`Your day: ${n.targetKcal.toLocaleString()} kcal.`);
+  },
+  setWorkoutKind(d) {
+    const day = ensureDay(d.date);
+    const w = day.me.workouts[d.task] || (day.me.workouts[d.task] = { mins: 45 });
+    w.kind = d.k;
+    const note = $('#woNote'); if (note) w.note = note.value.trim();
+    save();
+    renderApp();
+  },
+  workoutMins(d) {
+    const day = ensureDay(d.date);
+    const w = day.me.workouts[d.task] || (day.me.workouts[d.task] = { mins: 45 });
+    w.mins = Math.max(5, Math.min(240, (w.mins || 45) + Number(d.d)));
+    const note = $('#woNote'); if (note) w.note = note.value.trim();
+    save();
+    renderApp();
+  },
+  saveWorkout(d) {
+    const day = ensureDay(d.date);
+    const w = day.me.workouts[d.task] || (day.me.workouts[d.task] = { mins: 45 });
+    const note = $('#woNote'); if (note) w.note = note.value.trim();
+    UI.sheet = null;
+    save();
+    renderApp();
+    showToast('Logged. That counts.');
+  },
+  workoutSheet(d) { UI.sheet = { type: 'workoutLog', date: d.date, task: d.task }; renderApp(); },
+  saveReflection(d) {
+    const text = (($('#reflectText') || {}).value || '').trim();
+    if (!text) { showToast('A sentence is enough.'); return; }
+    S.reflections.push({ week: Number(d.week), date: todayStr(), text: text.slice(0, 600) });
+    UI.sheet = null;
+    save();
+    renderApp();
+    showToast('Reflection kept.');
+  },
+  setTheme(d) {
+    S.settings.theme = d.v;
+    save();
+    applyTheme();
+    renderApp();
+  },
+  toggleReminders() {
+    const r = S.settings.reminders;
+    if (r.on) { r.on = false; save(); renderApp(); return; }
+    if (!('Notification' in window)) { showToast('This browser has no notifications.'); return; }
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') {
+        r.on = true;
+        save();
+        renderApp();
+        showToast('Reminders on — while the app is open or in a tab.');
+      } else {
+        showToast('Notifications were not allowed.');
+      }
+    });
   },
   setChallengeMode(d) {
     S.settings.challengeMode = d.v;
@@ -2112,6 +2384,30 @@ const ACTIONS = {
   },
 };
 
+function doLogFood(date, food) {
+  const day = ensureDay(date);
+  day.me.food.push({
+    id: uid(), name: food.name, serving: food.serving, qty: 1,
+    kcal: Math.round(food.kcal), p: food.p || 0, c: food.c || 0, f: food.f || 0,
+    meal: MEALS[UI.foodMeal || 0],
+  });
+  pushRecentFood(food);
+  save();
+  renderApp();
+  showToast(`${food.name} — logged.`);
+}
+
+function tryLogFood(date, food) {
+  const check = checkDietCompliance(food);
+  if (check.flag) {
+    UI.pendingFood = { date, food, reason: check.reason, swap: foodSwapFor(check.word) };
+    UI.sheet = { type: 'dietWarn', date };
+    renderApp();
+    return;
+  }
+  doLogFood(date, food);
+}
+
 function pushRecentFood(r) {
   const key = `${r.name}|${r.serving}`;
   S.foodRecents = (S.foodRecents || []).filter(x => `${x.name}|${x.serving}` !== key);
@@ -2127,8 +2423,17 @@ function nudgeProof(date, taskId) {
 
 function celebrateDay(date) {
   if (dayComplete(date)) {
-    showToast(`Day ${dayNumberOf(date)} sealed.`);
+    const n = dayNumberOf(date);
+    showToast(`Day ${n} sealed.`);
     if (UI.fixing === date) UI.fixing = null;
+    const ms = MILESTONES.find(m => m[0] === n);
+    if (ms && !S.milestonesSeen.includes(n)) {
+      S.milestonesSeen.push(n);
+      save();
+      UI.sheet = { type: 'milestone', n };
+    } else if (n % 7 === 0 && n < 75 && !S.reflections.some(r => r.week === n / 7)) {
+      UI.sheet = { type: 'reflect', week: n / 7 };
+    }
   } else if (isCouple() && S.profile.coupleRule === 'together') {
     showToast(`Your side is done — waiting on ${S.profile.partnerName || 'your partner'}.`);
   }
@@ -2152,12 +2457,27 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('change', e => {
+  const journal = e.target.closest('[data-journal]');
+  if (journal) {
+    const day = ensureDay(journal.dataset.journal);
+    day.me.note = journal.value.slice(0, 2000);
+    save();
+    return;
+  }
+  const rtime = e.target.closest('[data-rtime]');
+  if (rtime) {
+    if (/^\d{2}:\d{2}$/.test(rtime.value)) S.settings.reminders[rtime.dataset.rtime] = rtime.value;
+    save();
+    return;
+  }
   const el = e.target.closest('[data-field]');
   if (!el) return;
   const f = el.dataset.field;
   if (f === 'name') S.profile.name = el.value.trim().slice(0, 30);
   if (f === 'partnerName') S.profile.partnerName = el.value.trim().slice(0, 30);
   if (f === 'dietName') S.profile.dietName = el.value.trim().slice(0, 30);
+  if (f === 'why') S.profile.why = el.value.trim().slice(0, 140);
+  if (f === 'bannedWords') S.settings.bannedWords = el.value.trim().slice(0, 200);
   save();
 });
 
@@ -2170,6 +2490,31 @@ document.addEventListener('input', e => {
   }
 });
 
+/* Reminders — fire while the app is open or backgrounded in a tab. */
+function checkReminders() {
+  const r = S.settings.reminders;
+  if (!r || !r.on || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!S.onboarded || S.attempt.status !== 'active') return;
+  const now = new Date();
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  if (hhmm !== r.am && hhmm !== r.pm) return;
+  const key = todayStr() + hhmm;
+  if (UI.lastReminder === key) return;
+  UI.lastReminder = key;
+  const day = getDay(todayStr());
+  const missing = TASKS.filter(t => !taskDone(day, 'me', t));
+  if (!missing.length) return;
+  try {
+    new Notification('SEVENTY-FIVE', {
+      body: missing.length === 1
+        ? `${missing[0].title} is still open — ${countdownText()}.`
+        : `${missing.length} tasks still open — ${countdownText()}. ${missing[0].title} first?`,
+      icon: './icons/icon-192.png',
+      tag: 'seventyfive-reminder',
+    });
+  } catch { /* some platforms only allow notifications from a service worker */ }
+}
+
 /* Day rollover + countdown tick */
 setInterval(() => {
   const t = todayStr();
@@ -2181,6 +2526,7 @@ setInterval(() => {
     const el = $('#countdown');
     if (el) el.textContent = countdownText();
   }
+  checkReminders();
 }, 30000);
 
 document.addEventListener('visibilitychange', () => {
@@ -2201,4 +2547,8 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 
 window.__75 = { get state() { return S; }, save, render: renderApp };
 
+applyTheme();
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().catch(() => {});
+}
 evaluateAndRender();

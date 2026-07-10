@@ -39,6 +39,14 @@ with its occasion and shown as spent.
 - **Two disciplines** — *75 Hard* (miss a task, back to Day One) or *Flexible*
   (a missed day is recorded in the journey, the count keeps going). Chosen at
   onboarding, changeable in settings.
+- **Diet compliance** — logging or scanning a food that breaks your named diet
+  (or your custom banned list, or the always-banned alcohol) raises a warning
+  with a healthier swap before it hits the log.
+- **Mind games that work** — your "why" written on day one and shown every day,
+  a don't-break-the-chain streak, day 10/25/50/75 milestones, weekly reflection
+  prompts, a nightly journal, and workout detail logging (type, minutes, notes).
+- **Themes** — Auto/Light/Dark plus a black-and-gold **Hardcore** mode. Optional
+  in-app reminders while the app is open.
 - **The change** — day-by-day progress pictures build into a before/after comparison
   and a full-screen time-lapse reel of your transformation, shown on the Journey
   screen and again when you finish all 75 days.

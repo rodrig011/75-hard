@@ -42,7 +42,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]):not([data-theme="hardcore"]) {
     --bg: #131714;
     --surface: #1c221e;
     --surface-2: #262d28;
@@ -68,6 +68,61 @@
     --shadow: none;
     --shadow-lift: 0 20px 55px rgba(0, 0, 0, 0.55);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #131714;
+  --surface: #1c221e;
+  --surface-2: #262d28;
+  --hairline: rgba(240, 240, 233, 0.08);
+  --hairline-strong: rgba(240, 240, 233, 0.17);
+  --ink: #eeede5;
+  --ink-2: rgba(238, 237, 229, 0.6);
+  --ink-3: rgba(238, 237, 229, 0.38);
+  --green: #86ab97;
+  --green-2: #9cc0ac;
+  --green-deep: #6f957f;
+  --green-dim: rgba(134, 171, 151, 0.13);
+  --on-green: #121712;
+  --gold: #c1a067;
+  --gold-2: #d5b87f;
+  --gold-dim: rgba(193, 160, 103, 0.14);
+  --blue: #7ba7cd;
+  --blue-dim: rgba(123, 167, 205, 0.16);
+  --red: #dd7361;
+  --red-dim: rgba(221, 115, 97, 0.14);
+  --glass: rgba(28, 34, 30, 0.6);
+  --glass-edge: rgba(255, 255, 255, 0.07);
+  --shadow: none;
+  --shadow-lift: 0 20px 55px rgba(0, 0, 0, 0.55);
+}
+
+/* Hardcore — black and gold. No softness anywhere. */
+:root[data-theme="hardcore"] {
+  --bg: #060607;
+  --surface: #101013;
+  --surface-2: #17171b;
+  --hairline: rgba(244, 241, 234, 0.09);
+  --hairline-strong: rgba(244, 241, 234, 0.18);
+  --ink: #f4f1ea;
+  --ink-2: rgba(244, 241, 234, 0.6);
+  --ink-3: rgba(244, 241, 234, 0.38);
+  --green: #c9a961;
+  --green-2: #e6cf9a;
+  --green-deep: #a8834a;
+  --green-dim: rgba(201, 169, 97, 0.14);
+  --on-green: #1c1608;
+  --gold: #c9a961;
+  --gold-2: #e6cf9a;
+  --gold-dim: rgba(201, 169, 97, 0.14);
+  --blue: #c9a961;
+  --blue-dim: rgba(201, 169, 97, 0.14);
+  --red: #ff453a;
+  --red-dim: rgba(255, 69, 58, 0.14);
+  --glass: rgba(12, 12, 15, 0.65);
+  --glass-edge: rgba(255, 255, 255, 0.08);
+  --shadow: none;
+  --shadow-lift: 0 20px 55px rgba(0, 0, 0, 0.6);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -233,7 +288,15 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   border-color: transparent;
   color: var(--on-green);
   transform: scale(1.04);
+  animation: checkPop 0.45s var(--ease);
 }
+.task-check.on .ic path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+  animation: checkDraw 0.4s var(--ease) 0.05s backwards;
+}
+@keyframes checkPop { 0% { transform: scale(0.7); } 55% { transform: scale(1.16); } 100% { transform: scale(1.04); } }
+@keyframes checkDraw { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
 .task-check:active { transform: scale(0.9); }
 .task-check.small { width: 26px; height: 26px; }
 .task-check.small .ic { width: 14px; height: 14px; }
@@ -281,7 +344,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   background: linear-gradient(90deg, var(--green), var(--green-2));
   transition: width 0.5s var(--ease);
 }
-.bar-fill.water { background: linear-gradient(90deg, var(--blue), #57a3dd); }
+.bar-fill.water { background: linear-gradient(90deg, var(--blue), color-mix(in srgb, var(--blue) 65%, white)); }
 .bar-fill.gold { background: linear-gradient(90deg, var(--gold), var(--gold-2)); }
 .bar-fill.over { background: linear-gradient(90deg, #c96b2d, #e08a44); }
 
@@ -357,6 +420,94 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   border-radius: 100px;
   cursor: pointer;
 }
+
+.chain-line {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border-radius: 100px;
+  padding: 5px 12px;
+}
+.chain-line .ic { width: 15px; height: 15px; }
+
+.why-card {
+  padding: 4px 6px 14px;
+}
+.why-card .kicker { font-size: 10px; }
+.why-card p {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  margin-top: 3px;
+}
+
+.why-quote {
+  font-style: italic;
+  font-size: 16px;
+  color: var(--gold);
+  margin: 12px 0;
+  text-align: center;
+}
+
+.journal-card textarea { margin-bottom: 0; }
+
+.kind-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.chip.on {
+  background: linear-gradient(160deg, var(--green-2), var(--green));
+  color: var(--on-green);
+  border-color: transparent;
+}
+.book-chip.logged { border-color: rgba(69, 105, 87, 0.35); color: var(--green-deep); background: var(--green-dim); }
+
+.medals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.medal {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1.5px dashed var(--hairline-strong);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--ink-3);
+}
+.medal .serif { font-size: 22px; }
+.medal small { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+.medal.earned {
+  border: none;
+  background: linear-gradient(160deg, var(--gold-2), var(--gold));
+  color: #241c0c;
+  box-shadow: 0 6px 18px rgba(165, 130, 78, 0.35);
+}
+
+.milestone-num {
+  font-size: 88px;
+  line-height: 1;
+  text-align: center;
+  background: linear-gradient(165deg, var(--gold-2), var(--gold) 75%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  padding: 10px 0 4px;
+}
+
+.warn-food {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.swap-tip {
+  background: var(--green-dim);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--green-deep);
+  margin-bottom: 12px;
+}
+.reflect-row .muted { white-space: pre-wrap; }
 
 .footnote {
   text-align: center;

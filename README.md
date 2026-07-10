@@ -29,7 +29,10 @@ with its occasion and shown as spent.
   stored on-device in IndexedDB.
 - **Calorie tracker** — a personal daily calorie target computed from a short
   questionnaire (sex, age, height, weight, activity, goal — Mifflin–St Jeor), and a
-  per-day food log with meals and calories on the diet card.
+  MyFitnessPal-style food log: search a built-in library of ~300 common foods with
+  macros, search millions more online via Open Food Facts, adjust portions, re-log
+  recents in one tap, and save your own custom foods. Protein/carbs/fat totals roll
+  up on the diet card.
 - **The change** — day-by-day progress pictures build into a before/after comparison
   and a full-screen time-lapse reel of your transformation, shown on the Journey
   screen and again when you finish all 75 days.

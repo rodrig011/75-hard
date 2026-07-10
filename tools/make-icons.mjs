@@ -78,13 +78,13 @@ const RING_W = 0.014;
 
 function lerp(a, b, t) { return a + (b - a) * t; }
 
-// Champagne-gold vertical gradient.
+// Champagne-cream vertical gradient for the mark.
 function gold(v) {
   const t = Math.max(0, Math.min(1, (v - 0.24) / 0.52));
   return [
-    lerp(0xea, 0xb2, t),
-    lerp(0xd7, 0x8e, t),
-    lerp(0xa8, 0x4a, t),
+    lerp(0xf2, 0xd2, t),
+    lerp(0xe9, 0xb5, t),
+    lerp(0xd2, 0x7e, t),
   ];
 }
 
@@ -99,8 +99,10 @@ function render(size) {
           const u = (x + (sx + 0.5) / SS) / size;
           const v = (y + (sy + 0.5) / SS) / size;
           const dc = Math.hypot(u - 0.5, v - 0.42);
-          const base = lerp(0x16, 0x08, Math.min(1, dc / 0.72));
-          let pr = base, pg = base, pb = base + 2;
+          const t = Math.min(1, dc / 0.72);
+          let pr = lerp(0x17, 0x0b, t);
+          let pg = lerp(0x54, 0x30, t);
+          let pb = lerp(0x3d, 0x24, t);
 
           const aa = 1 / size;
           const [gr, gg, gb] = gold(v);

@@ -74,6 +74,8 @@ const ICONS = {
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
   seal: '<circle cx="12" cy="12" r="8.5"/><path d="M8.2 12.3l2.7 2.7 5-5.4"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8L21 21"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.3 3.9 5.2 3.9 8.5s-1.3 6.2-3.9 8.5c-2.6-2.3-3.9-5.2-3.9-8.5s1.3-6.2 3.9-8.5z"/>',
 };
 
 function icon(name, cls = '') {
@@ -97,6 +99,8 @@ function defaultState() {
     books: [],
     currentBookId: null,
     cheat: { allowance: 10, used: [] },
+    myFoods: [],
+    foodRecents: [],
     settings: { strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false, nutrition: null },
   };
 }
@@ -138,8 +142,14 @@ const UI = {
   lastToday: todayStr(),
   galleryFor: null,
   foodMeal: 0,
+  foodQuery: '',
+  foodCustomOpen: false,
   nutriDraft: null,
 };
+
+/* Current rows shown in the food-search results list (local + web). */
+let FOOD_RESULTS = [];
+let offAbort = null;
 
 const proofURLs = new Map();
 let pendingCapture = null;
@@ -215,8 +225,20 @@ function currentBook() {
 }
 
 /* Nutrition — Mifflin–St Jeor estimate */
+function entryKcal(f) {
+  return Math.round((Number(f.kcal) || 0) * (Number(f.qty) || 1));
+}
 function kcalEaten(p) {
-  return (p.food || []).reduce((a, f) => a + (Number(f.kcal) || 0), 0);
+  return (p.food || []).reduce((a, f) => a + entryKcal(f), 0);
+}
+function macrosEaten(person) {
+  return (person.food || []).reduce((m, f) => {
+    const q = Number(f.qty) || 1;
+    m.p += (Number(f.p) || 0) * q;
+    m.c += (Number(f.c) || 0) * q;
+    m.f += (Number(f.f) || 0) * q;
+    return m;
+  }, { p: 0, c: 0, f: 0 });
 }
 function kcalTarget() {
   const n = S.settings.nutrition;
@@ -407,6 +429,7 @@ function renderApp() {
     if (c) c.scrollTop = scrollY;
   }
   hydrateProofImages();
+  if (UI.sheet && UI.sheet.type === 'food') updateFoodResults();
 }
 
 /* ── Onboarding ── */
@@ -655,7 +678,7 @@ function renderTaskRow(date, me, t) {
     const p = Math.min(1, oz / goal);
     extra = `
       <div class="water-wrap">
-        <div class="bar"><div class="bar-fill" style="width:${(p * 100).toFixed(1)}%"></div></div>
+        <div class="bar"><div class="bar-fill water" style="width:${(p * 100).toFixed(1)}%"></div></div>
         <div class="water-row">
           <span class="water-count">${oz} <small>/ ${goal} oz</small></span>
           <span class="chips">
@@ -706,6 +729,7 @@ function renderTaskRow(date, me, t) {
           A true occasion? Use one of your ${cheatRemaining('me')} passes
         </button>`;
     }
+    const mm = macrosEaten(me);
     extra = `
       <div class="food-wrap">
         ${target ? `
@@ -713,7 +737,8 @@ function renderTaskRow(date, me, t) {
           <div class="water-row">
             <span class="water-count">${eaten.toLocaleString()} <small>/ ${target.toLocaleString()} kcal</small></span>
             <button class="chip" data-action="sheet" data-sheet="food" data-date="${date}">Log food</button>
-          </div>` : `
+          </div>
+          ${(mm.p || mm.c || mm.f) ? `<div class="macro-row"><span>P <b>${Math.round(mm.p)}g</b></span><span>C <b>${Math.round(mm.c)}g</b></span><span>F <b>${Math.round(mm.f)}g</b></span></div>` : ''}` : `
           <div class="water-row">
             <button class="book-chip empty" data-action="openNutrition">${icon('plus')} <span>Set your daily calories</span></button>
             <button class="chip" data-action="sheet" data-sheet="food" data-date="${date}">Log food</button>
@@ -845,7 +870,7 @@ function renderReading() {
         <div class="kicker">Now reading</div>
         <h2 class="serif book-title">${esc(book.title)}</h2>
         ${book.author ? `<div class="muted">${esc(book.author)}</div>` : ''}
-        <div class="bar big"><div class="bar-fill" style="width:${Math.min(100, (book.pagesRead / book.totalPages) * 100).toFixed(1)}%"></div></div>
+        <div class="bar big"><div class="bar-fill gold" style="width:${Math.min(100, (book.pagesRead / book.totalPages) * 100).toFixed(1)}%"></div></div>
         <div class="book-meta">
           <span>${book.pagesRead} of ${book.totalPages} pages</span>
           <span>${Math.max(0, book.totalPages - book.pagesRead)} to go</span>
@@ -1161,28 +1186,52 @@ function renderSheet() {
     const me = day.me;
     const target = kcalTarget();
     const eaten = kcalEaten(me);
+    const m = macrosEaten(me);
     inner = `
       <div class="sheet-title serif">Food log</div>
       <p class="muted small">${prettyDate(sh.date)}${target ? ` · ${eaten > target ? `${(eaten - target).toLocaleString()} kcal over` : `${(target - eaten).toLocaleString()} kcal left`}` : ''}</p>
       ${target ? `<div class="bar"><div class="bar-fill ${eaten > target ? 'over' : ''}" style="width:${Math.min(100, (eaten / target) * 100).toFixed(1)}%"></div></div>
-        <div class="food-total"><span>${eaten.toLocaleString()} kcal</span><span class="muted small">target ${target.toLocaleString()}</span></div>` : ''}
+        <div class="food-total"><span>${eaten.toLocaleString()} kcal</span><span class="muted small">target ${target.toLocaleString()}</span></div>` : `
+        <div class="food-total"><span>${eaten.toLocaleString()} kcal</span></div>`}
+      ${(m.p || m.c || m.f) ? `<div class="macro-row"><span>Protein <b>${Math.round(m.p)}g</b></span><span>Carbs <b>${Math.round(m.c)}g</b></span><span>Fat <b>${Math.round(m.f)}g</b></span></div>` : ''}
+      <div class="food-sect">Add to</div>
+      <div class="seg" id="foodMealSeg">
+        ${MEALS.map((meal, i) => `<button class="seg-opt ${i === (UI.foodMeal || 0) ? 'on' : ''}" data-action="foodMeal" data-i="${i}">${meal}</button>`).join('')}
+      </div>
+      <div class="food-search-wrap">
+        ${icon('search')}
+        <input class="input" id="foodSearch" type="search" placeholder="Search foods — chicken, latte, tacos…" maxlength="60" autocomplete="off" value="${esc(UI.foodQuery || '')}">
+      </div>
+      <ul class="food-results" id="foodResults"></ul>
+      ${UI.foodCustomOpen ? `
+        <div class="food-sect">Create your own</div>
+        <input class="input" id="cfName" type="text" placeholder="Name — e.g. Mom's pozole" maxlength="40" value="${esc(UI.foodQuery || '')}">
+        <div class="food-form">
+          <input class="input" id="cfServing" type="text" placeholder="Serving — e.g. 1 bowl" maxlength="30">
+          <input class="input" id="cfKcal" type="number" inputmode="numeric" placeholder="kcal" min="0" max="5000">
+        </div>
+        <div class="macro-form">
+          <input class="input" id="cfP" type="number" inputmode="numeric" placeholder="Protein g">
+          <input class="input" id="cfC" type="number" inputmode="numeric" placeholder="Carbs g">
+          <input class="input" id="cfF" type="number" inputmode="numeric" placeholder="Fat g">
+        </div>
+        <button class="btn primary wide" data-action="saveCustomFood" data-date="${esc(sh.date)}">Save &amp; log it</button>
+        <button class="btn ghost wide" data-action="hideCustomFood">Cancel</button>` : ''}
       ${me.food.length ? `
+        <div class="food-sect">Logged · ${prettyDate(sh.date)}</div>
         <ul class="food-list">
           ${me.food.map(f => `
             <li class="food-row">
-              <div><strong>${esc(f.name)}</strong><div class="muted small">${esc(f.meal)}</div></div>
-              <span class="food-kcal">${(Number(f.kcal) || 0).toLocaleString()}</span>
+              <div><strong>${esc(f.name)}</strong><div class="muted small">${esc(f.meal)}${f.serving ? ` · ${esc(f.serving)}` : ''}</div></div>
+              <span class="qty-ctl">
+                <button data-action="foodQty" data-date="${esc(sh.date)}" data-id="${esc(f.id)}" data-d="-0.5" aria-label="Less">−</button>
+                <span>${Number(f.qty) && Number(f.qty) !== 1 ? Number(f.qty) + '×' : '1×'}</span>
+                <button data-action="foodQty" data-date="${esc(sh.date)}" data-id="${esc(f.id)}" data-d="0.5" aria-label="More">+</button>
+              </span>
+              <span class="food-kcal">${entryKcal(f).toLocaleString()}</span>
               <button class="iconbtn" data-action="delFood" data-date="${esc(sh.date)}" data-id="${esc(f.id)}" aria-label="Remove">${icon('close')}</button>
             </li>`).join('')}
-        </ul>` : `<p class="muted small">Nothing on the plate yet.</p>`}
-      <div class="food-form">
-        <input class="input" id="foodName" type="text" placeholder="What did you eat?" maxlength="40" autocomplete="off">
-        <input class="input" id="foodKcal" type="number" inputmode="numeric" placeholder="kcal" min="0" max="5000">
-      </div>
-      <div class="seg" id="foodMealSeg">
-        ${MEALS.map((m, i) => `<button class="seg-opt ${i === (UI.foodMeal || 0) ? 'on' : ''}" data-action="foodMeal" data-i="${i}">${m}</button>`).join('')}
-      </div>
-      <button class="btn primary wide" data-action="addFood" data-date="${esc(sh.date)}">Add to the log</button>
+        </ul>` : ''}
       ${!target ? `<button class="btn ghost wide" data-action="openNutrition">Calculate my daily calories</button>` : ''}
       <button class="btn ghost wide" data-action="closeSheet">Done</button>`;
   }
@@ -1314,6 +1363,84 @@ function openTimelapse(photos) {
   step();
   const timer = setInterval(step, 700);
   ov.addEventListener('click', () => { clearInterval(timer); ov.remove(); });
+}
+
+/* ───────────────────────── Food search ───────────────────────── */
+
+function foodResultRow(r, idx) {
+  return `
+    <li>
+      <button class="food-result ${r.src === 'web' ? 'web' : ''}" data-action="addFoodResult" data-idx="${idx}">
+        <span class="fr-add">${icon(r.src === 'web' ? 'globe' : 'plus')}</span>
+        <span class="fr-body">
+          <span class="fr-name">${esc(r.name)}</span>
+          <span class="fr-sub">${esc(r.serving)}${(r.p || r.c || r.f) ? ` · P${Math.round(r.p)} C${Math.round(r.c)} F${Math.round(r.f)}` : ''}${r.src === 'mine' ? ' · my food' : ''}</span>
+        </span>
+        <span class="fr-kcal">${Math.round(r.kcal).toLocaleString()}</span>
+      </button>
+    </li>`;
+}
+
+function updateFoodResults(webRows) {
+  const box = $('#foodResults');
+  if (!box) return;
+  const q = (UI.foodQuery || '').trim();
+
+  if (q.length < 2) {
+    FOOD_RESULTS = (S.foodRecents || []).slice(0, 8);
+    box.innerHTML = FOOD_RESULTS.length
+      ? `<div class="food-sect">Recent</div>` + FOOD_RESULTS.map(foodResultRow).join('')
+      : `<p class="food-empty">Search the built-in food library, or your own saved foods. Recents will appear here.</p>`;
+    return;
+  }
+
+  FOOD_RESULTS = searchFoods(q, S.myFoods);
+  if (webRows && webRows.length) FOOD_RESULTS = FOOD_RESULTS.concat(webRows);
+
+  box.innerHTML =
+    FOOD_RESULTS.map(foodResultRow).join('') +
+    (webRows ? '' : `
+      <li>
+        <button class="food-result web" data-action="searchOnline" id="webSearchBtn">
+          <span class="fr-add">${icon('globe')}</span>
+          <span class="fr-body"><span class="fr-name">Search the web for “${esc(q)}”</span>
+          <span class="fr-sub">Open Food Facts — millions of products</span></span>
+        </button>
+      </li>`) +
+    `<li>
+      <button class="food-result" data-action="showCustomFood">
+        <span class="fr-add">${icon('plus')}</span>
+        <span class="fr-body"><span class="fr-name">Create “${esc(q)}”</span>
+        <span class="fr-sub">Your own food, saved for next time</span></span>
+      </button>
+    </li>`;
+}
+
+function searchOpenFoodFacts(q) {
+  if (offAbort) offAbort.abort();
+  offAbort = new AbortController();
+  const url = 'https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=8'
+    + '&fields=product_name,brands,serving_size,nutriments&search_terms=' + encodeURIComponent(q);
+  const timer = setTimeout(() => offAbort.abort(), 8000);
+  return fetch(url, { signal: offAbort.signal })
+    .then(r => r.json())
+    .then(data => (data.products || []).map(p => {
+      const n = p.nutriments || {};
+      const perServing = n['energy-kcal_serving'];
+      const kcal = perServing != null ? perServing : n['energy-kcal_100g'];
+      if (kcal == null || !p.product_name) return null;
+      const suffix = perServing != null ? '_serving' : '_100g';
+      return {
+        name: p.brands ? `${p.product_name} (${p.brands.split(',')[0].trim()})` : p.product_name,
+        serving: perServing != null ? (p.serving_size || '1 serving') : '100 g',
+        kcal: Math.round(Number(kcal)),
+        p: Number(n['proteins' + suffix]) || 0,
+        c: Number(n['carbohydrates' + suffix]) || 0,
+        f: Number(n['fat' + suffix]) || 0,
+        src: 'web',
+      };
+    }).filter(Boolean))
+    .finally(() => clearTimeout(timer));
 }
 
 /* ───────────────────────── Countdown ───────────────────────── */
@@ -1609,13 +1736,26 @@ const ACTIONS = {
     const seg = $('#foodMealSeg');
     if (seg) seg.querySelectorAll('.seg-opt').forEach((b, i) => b.classList.toggle('on', i === UI.foodMeal));
   },
-  addFood(d) {
-    const name = (($('#foodName') || {}).value || '').trim();
-    const kcal = parseInt(($('#foodKcal') || {}).value, 10);
-    if (!name) { showToast('What was it?'); return; }
-    if (!(kcal >= 0)) { showToast('Add the calories.'); return; }
+  addFoodResult(d) {
+    const r = FOOD_RESULTS[Number(d.idx)];
+    if (!r) return;
+    const date = (UI.sheet && UI.sheet.date) || todayStr();
+    const day = ensureDay(date);
+    day.me.food.push({
+      id: uid(), name: r.name, serving: r.serving, qty: 1,
+      kcal: Math.round(r.kcal), p: r.p || 0, c: r.c || 0, f: r.f || 0,
+      meal: MEALS[UI.foodMeal || 0],
+    });
+    pushRecentFood(r);
+    save();
+    renderApp();
+    showToast(`${r.name} — logged.`);
+  },
+  foodQty(d) {
     const day = ensureDay(d.date);
-    day.me.food.push({ id: uid(), name, kcal: Math.min(5000, kcal), meal: MEALS[UI.foodMeal || 0] });
+    const f = day.me.food.find(x => x.id === d.id);
+    if (!f) return;
+    f.qty = Math.min(20, Math.max(0.5, (Number(f.qty) || 1) + Number(d.d)));
     save();
     renderApp();
   },
@@ -1625,6 +1765,47 @@ const ACTIONS = {
     if (i >= 0) day.me.food.splice(i, 1);
     save();
     renderApp();
+  },
+  showCustomFood() { UI.foodCustomOpen = true; renderApp(); },
+  hideCustomFood() { UI.foodCustomOpen = false; renderApp(); },
+  saveCustomFood(d) {
+    const name = (($('#cfName') || {}).value || '').trim();
+    const kcal = parseInt(($('#cfKcal') || {}).value, 10);
+    if (!name) { showToast('Give it a name.'); return; }
+    if (!(kcal >= 0)) { showToast('Add the calories.'); return; }
+    const food = {
+      name,
+      serving: (($('#cfServing') || {}).value || '').trim() || '1 serving',
+      kcal: Math.min(5000, kcal),
+      p: Math.max(0, parseFloat(($('#cfP') || {}).value) || 0),
+      c: Math.max(0, parseFloat(($('#cfC') || {}).value) || 0),
+      f: Math.max(0, parseFloat(($('#cfF') || {}).value) || 0),
+    };
+    S.myFoods.unshift(food);
+    if (S.myFoods.length > 200) S.myFoods.pop();
+    const day = ensureDay(d.date);
+    day.me.food.push({ id: uid(), qty: 1, meal: MEALS[UI.foodMeal || 0], ...food });
+    pushRecentFood({ ...food, src: 'mine' });
+    UI.foodCustomOpen = false;
+    save();
+    renderApp();
+    showToast(`“${name}” saved to your foods.`);
+  },
+  searchOnline() {
+    const btn = $('#webSearchBtn');
+    if (btn) btn.querySelector('.fr-name').textContent = 'Searching…';
+    const q = (UI.foodQuery || '').trim();
+    searchOpenFoodFacts(q)
+      .then(rows => {
+        if ((UI.foodQuery || '').trim() !== q) return;
+        if (!rows.length) showToast('Nothing found online for that.');
+        updateFoodResults(rows);
+      })
+      .catch(err => {
+        if (err && err.name === 'AbortError') return;
+        showToast('No connection — the built-in library still works.');
+        updateFoodResults([]);
+      });
   },
 
   /* nutrition calculator */
@@ -1833,6 +2014,13 @@ const ACTIONS = {
   },
 };
 
+function pushRecentFood(r) {
+  const key = `${r.name}|${r.serving}`;
+  S.foodRecents = (S.foodRecents || []).filter(x => `${x.name}|${x.serving}` !== key);
+  S.foodRecents.unshift({ name: r.name, serving: r.serving, kcal: Math.round(r.kcal), p: r.p || 0, c: r.c || 0, f: r.f || 0 });
+  if (S.foodRecents.length > 14) S.foodRecents.length = 14;
+}
+
 function nudgeProof(date, taskId) {
   showToast('Proof first — attach the photo, then check it off.');
   const btn = document.querySelector(`.proof-btn[data-date="${date}"][data-task="${taskId}"]`);
@@ -1878,6 +2066,10 @@ document.addEventListener('change', e => {
 document.addEventListener('input', e => {
   const el = e.target.closest('[data-nfield]');
   if (el && UI.nutriDraft) UI.nutriDraft[el.dataset.nfield] = el.value;
+  if (e.target.id === 'foodSearch') {
+    UI.foodQuery = e.target.value;
+    updateFoodResults();
+  }
 });
 
 /* Day rollover + countdown tick */

@@ -509,6 +509,55 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 }
 .reflect-row .muted { white-space: pre-wrap; }
 
+/* ── Nutrition insights ── */
+
+.nutri-bars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 2px 2px;
+  margin-bottom: 10px;
+}
+.nutri-col {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  gap: 4px;
+  background: none; border: none; padding: 0;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.nutri-val { font-size: 9.5px; font-weight: 700; color: var(--ink-3); min-height: 12px; }
+.nutri-bar {
+  width: 70%;
+  max-width: 30px;
+  border-radius: 6px 6px 3px 3px;
+  background: linear-gradient(180deg, var(--green-2), var(--green));
+  transition: height 0.5s var(--ease);
+}
+.nutri-bar.over { background: linear-gradient(180deg, #e08a44, #c96b2d); }
+.nutri-day { font-size: 10px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; }
+.nutri-target {
+  position: absolute;
+  left: 0; right: 0;
+  border-top: 1.5px dashed var(--gold);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ── Loading & focus ── */
+
+img[data-proof-src]:not([src]) {
+  background: linear-gradient(100deg, var(--surface-2) 40%, var(--hairline) 50%, var(--surface-2) 60%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -80% 0; } }
+
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 6px; }
+button:focus:not(:focus-visible) { outline: none; }
+
 .footnote {
   text-align: center;
   font-size: 12px;

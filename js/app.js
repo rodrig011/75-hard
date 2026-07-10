@@ -105,6 +105,7 @@ function defaultState() {
     reflections: [],
     milestonesSeen: [],
     lastBackup: null,
+    customTasks: [],
     settings: {
       strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false,
       nutrition: null, challengeMode: 'hard', theme: 'system',
@@ -196,9 +197,21 @@ function proofOk(person, who, taskId) {
   return !!person.proofs[taskId];
 }
 
-function taskDone(day, who, task) {
+function activeTasksFor(date) {
+  const customs = (S.customTasks || []).filter(c => !date || c.since <= date);
+  if (!customs.length) return TASKS;
+  return TASKS.concat(customs.map(c => ({
+    id: c.id, title: c.title, sub: 'Your own rule. It counts like the rest.',
+    proof: false, icon: 'target', custom: true, since: c.since,
+  })));
+}
+const activeTasks = () => activeTasksFor(todayStr());
+
+function taskDone(date, who, task) {
+  const day = getDay(date);
   const p = day[who];
   if (!p) return false;
+  if (task.custom) return !!p.checks[task.id];
   switch (task.type) {
     case 'water': return p.water >= S.settings.waterGoalOz;
     case 'read': return p.pages >= S.settings.pagesGoal && proofOk(p, who, 'read');
@@ -208,20 +221,18 @@ function taskDone(day, who, task) {
   }
 }
 
-function personDone(day, who) {
-  return TASKS.every(t => taskDone(day, who, t));
+function personDone(date, who) {
+  return activeTasksFor(date).every(t => taskDone(date, who, t));
 }
 
 function dayComplete(date) {
-  const day = getDay(date);
-  if (!personDone(day, 'me')) return false;
-  if (isCouple() && S.profile.coupleRule === 'together') return personDone(day, 'partner');
+  if (!personDone(date, 'me')) return false;
+  if (isCouple() && S.profile.coupleRule === 'together') return personDone(date, 'partner');
   return true;
 }
 
 function missedTasks(date, who) {
-  const day = getDay(date);
-  return TASKS.filter(t => !taskDone(day, who, t));
+  return activeTasksFor(date).filter(t => !taskDone(date, who, t));
 }
 
 function cheatUsed(who) {
@@ -350,8 +361,7 @@ function applyTheme() {
 }
 
 function doneCount(date, who) {
-  const day = getDay(date);
-  return TASKS.filter(t => taskDone(day, who, t)).length;
+  return activeTasksFor(date).filter(t => taskDone(date, who, t)).length;
 }
 
 /* ───────────────────────── Failure / victory engine ───────────────────────── */
@@ -368,8 +378,8 @@ function computeFail() {
     const date = addDays(start, i);
     if (!dayComplete(date)) {
       const whoMissed = [];
-      if (!personDone(getDay(date), 'me')) whoMissed.push('me');
-      if (isCouple() && S.profile.coupleRule === 'together' && !personDone(getDay(date), 'partner')) whoMissed.push('partner');
+      if (!personDone(date, 'me')) whoMissed.push('me');
+      if (isCouple() && S.profile.coupleRule === 'together' && !personDone(date, 'partner')) whoMissed.push('partner');
       return {
         date,
         dayN: i + 1,
@@ -467,12 +477,12 @@ function onFileChosen(e) {
       const old = proofURLs.get(id);
       if (old) { URL.revokeObjectURL(old); proofURLs.delete(id); }
       const day = ensureDay(ctx.date);
-      const wasDone = personDone(day, 'me');
+      const wasDone = personDone(ctx.date, 'me');
       day[ctx.who].proofs[ctx.taskId] = id;
       save();
       evaluateAndRender();
       showToast(ctx.taskId === 'photo' ? 'Progress photo saved.' : 'Proof attached.');
-      if (ctx.who === 'me' && !wasDone && personDone(day, 'me')) celebrateDay(ctx.date);
+      if (ctx.who === 'me' && !wasDone && personDone(ctx.date, 'me')) celebrateDay(ctx.date);
     });
   }).catch(() => showToast('Could not read that image.'));
 }
@@ -727,11 +737,12 @@ function renderToday() {
 
   const day = ensureDay(editDate);
   const me = day.me;
+  const dayTasks = activeTasksFor(editDate);
   const done = doneCount(editDate, 'me');
-  const allDone = personDone(day, 'me');
-  const partnerDone = isCouple() ? personDone(day, 'partner') : true;
+  const allDone = personDone(editDate, 'me');
+  const partnerDone = isCouple() ? personDone(editDate, 'partner') : true;
   const sealed = dayComplete(editDate);
-  const pct = done / TASKS.length;
+  const pct = done / dayTasks.length;
   const R = 54, C = 2 * Math.PI * R;
 
   const installHint = shouldShowInstallHint() ? `
@@ -762,7 +773,7 @@ function renderToday() {
         <div>
           <div class="kicker">${prettyDate(editDate)} · Attempt ${roman(S.attempt.n)}</div>
           <h1 class="serif hero-num">Day ${dayN}</h1>
-          <div class="muted">${allDone ? 'Everything is done. Sealed.' : `${done} of ${TASKS.length} complete · <span id="countdown">${countdownText()}</span>`}</div>
+          <div class="muted">${allDone ? 'Everything is done. Sealed.' : `${done} of ${dayTasks.length} complete · <span id="countdown">${countdownText()}</span>`}</div>
           ${currentChain() >= 2 ? `<div class="chain-line">${icon('seal')} ${currentChain()}-day chain — don't break it</div>` : ''}
         </div>
         <div class="ring-wrap" aria-hidden="true">
@@ -794,7 +805,7 @@ function renderToday() {
       </div>` : ''}
     ${S.profile.why ? `<div class="why-card"><span class="kicker">Your why</span><p class="serif">“${esc(S.profile.why)}”</p></div>` : ''}
     <ul class="tasklist">
-      ${TASKS.map(t => renderTaskRow(editDate, me, t)).join('')}
+      ${dayTasks.map(t => renderTaskRow(editDate, me, t)).join('')}
     </ul>
     <div class="card journal-card">
       <div class="card-head"><strong>Tonight's page</strong><span class="muted small">just for you</span></div>
@@ -804,8 +815,7 @@ function renderToday() {
 }
 
 function renderTaskRow(date, me, t) {
-  const day = getDay(date);
-  const isDone = taskDone(day, 'me', t);
+  const isDone = taskDone(date, 'me', t);
   const pid = me.proofs[t.id];
 
   let extra = '';
@@ -941,13 +951,19 @@ function renderJourney() {
   for (let i = 1; i <= 75; i++) {
     const date = addDays(startDate(), i - 1);
     let cls = 'future';
+    let style = '';
     if (i < curN) {
       if (dayComplete(date)) cls = 'done';
-      else { cls = 'missed'; missedCount++; }
+      else {
+        cls = 'missed';
+        missedCount++;
+        const f = doneCount(date, 'me') / activeTasksFor(date).length;
+        if (f > 0) style = ` style="background:color-mix(in srgb, var(--green) ${Math.round(f * 55)}%, var(--red-dim))"`;
+      }
     } else if (i === curN) {
       cls = dayComplete(date) ? 'done today' : 'today';
     }
-    cells += `<div class="cell ${cls}" title="Day ${i}">${i === curN ? i : ''}</div>`;
+    cells += `<div class="cell ${cls}"${style} title="Day ${i}">${i === curN ? i : ''}</div>`;
   }
 
   const totalPages = S.books.reduce((a, b) => a + (b.pagesRead || 0), 0);
@@ -973,6 +989,7 @@ function renderJourney() {
       <div class="stat"><div class="stat-v serif">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
       <div class="stat"><div class="stat-v serif">${totalPages}</div><div class="stat-l">Pages read</div></div>
     </div>
+    ${renderNutriInsights()}
     <div class="card">
       <div class="card-head"><strong>Milestones</strong></div>
       <div class="medals">
@@ -1016,6 +1033,40 @@ function renderJourney() {
             </li>`).join('')}
         </ul>
       </div>` : ''}`;
+}
+
+function renderNutriInsights() {
+  const today = todayStr();
+  const target = kcalTarget();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const date = addDays(today, -i);
+    if (dayNumberOf(date) < 1) continue;
+    const me = getDay(date).me || blankPerson();
+    days.push({ date, kcal: kcalEaten(me), items: (me.food || []).length });
+  }
+  const logged = days.filter(d => d.items > 0);
+  if (!logged.length) return '';
+  const max = Math.max(target || 0, ...days.map(d => d.kcal), 1);
+  const avg = Math.round(logged.reduce((a, d) => a + d.kcal, 0) / logged.length);
+  const onTarget = target ? logged.filter(d => d.kcal <= target).length : 0;
+  return `
+    <div class="card">
+      <div class="card-head"><strong>Fuel — last 7 days</strong>
+        <span class="muted small">${target ? `${onTarget} of ${logged.length} on target` : `avg ${avg.toLocaleString()} kcal`}</span>
+      </div>
+      <div class="nutri-bars">
+        ${days.map(d => `
+          <button class="nutri-col" data-action="sheet" data-sheet="food" data-date="${d.date}" aria-label="${prettyDate(d.date)}">
+            <span class="nutri-val">${d.kcal ? (d.kcal >= 1000 ? (d.kcal / 1000).toFixed(1) + 'k' : d.kcal) : ''}</span>
+            <span class="nutri-bar ${target && d.kcal > target ? 'over' : ''}" style="height:${Math.max(4, Math.round((d.kcal / max) * 72))}px"></span>
+            <span class="nutri-day">${parseDate(d.date).toLocaleDateString(undefined, { weekday: 'narrow' })}</span>
+          </button>`).join('')}
+        ${target ? `<div class="nutri-target" style="bottom:${Math.min(92, Math.round((target / max) * 72) + 20)}px"></div>` : ''}
+      </div>
+      ${target ? `<p class="muted small">Average ${avg.toLocaleString()} kcal against a ${target.toLocaleString()} target. Tap a day to see its plate.</p>`
+        : `<p class="muted small">Tap a day to see its plate. Set a calorie target in More for the full picture.</p>`}
+    </div>`;
 }
 
 function countSealedDays() {
@@ -1081,19 +1132,19 @@ function renderCouple() {
   const day = ensureDay(today);
   const partner = S.profile.partnerName || 'Your partner';
   const pDone = doneCount(today, 'partner');
-  const pAll = personDone(day, 'partner');
+  const pAll = personDone(today, 'partner');
 
   return `
     <header class="appheader">
       <div class="kicker">${S.profile.coupleRule === 'together' ? 'Bound together — one misses, both restart' : 'Side by side'}</div>
       <h1 class="serif page-title">${esc(partner)}</h1>
-      <p class="muted">${pAll ? `${esc(partner)} has sealed the day.` : `${pDone} of ${TASKS.length} complete today.`}</p>
+      <p class="muted">${pAll ? `${esc(partner)} has sealed the day.` : `${pDone} of ${activeTasksFor(today).length} complete today.`}</p>
     </header>
     <div class="card">
       <div class="card-head"><strong>${esc(partner)}'s day</strong><span class="muted small">${prettyDate(today)}</span></div>
       <ul class="plist">
-        ${TASKS.map(t => {
-          const isDone = taskDone(day, 'partner', t);
+        ${activeTasksFor(today).map(t => {
+          const isDone = taskDone(today, 'partner', t);
           return `
             <li class="prow">
               <button class="task-check small ${isDone ? 'on' : ''}" data-action="partnerToggle" data-date="${today}" data-task="${t.id}">${icon('check')}</button>
@@ -1246,6 +1297,24 @@ function renderMore() {
     </div>
 
     <div class="card">
+      <div class="card-head"><strong>Your own commitments</strong><span class="muted small">${(S.customTasks || []).length}/4</span></div>
+      ${(S.customTasks || []).length ? `
+        <ul class="list">
+          ${S.customTasks.map(c => `
+            <li class="row">
+              <div><strong>${esc(c.title)}</strong><div class="muted small">since ${shortDate(c.since)}</div></div>
+              <button class="iconbtn" data-action="removeCustomTask" data-id="${esc(c.id)}" aria-label="Remove">${icon('trash')}</button>
+            </li>`).join('')}
+        </ul>` : ''}
+      ${(S.customTasks || []).length < 4 ? `
+        <div class="food-form">
+          <input class="input" id="ctTitle" type="text" placeholder="e.g. 10 minutes of stretching" maxlength="40">
+          <button class="btn primary" data-action="addCustomTask">Add</button>
+        </div>` : ''}
+      <p class="muted small">Extra rules join the daily list from today onward and count toward sealing the day — same stakes as the rest.</p>
+    </div>
+
+    <div class="card">
       <div class="card-head"><strong>The rules of 75 Hard</strong></div>
       <ol class="rules-list">
         <li><strong>Follow a structured diet</strong> geared toward your goals — zero deviations, zero excuses, zero alcohol.</li>
@@ -1278,6 +1347,12 @@ function renderMore() {
       </div>
       <p class="muted small">Backups carry your log and settings. Proof photos stay on the device they were taken on.</p>
       <p class="muted small" id="storageStatus">${S.lastBackup ? `Last backup: ${shortDate(S.lastBackup)}.` : 'No backup yet — one tap keeps 75 days safe.'}</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><strong>Spread it</strong></div>
+      <p class="muted small">Know someone who talks about doing 75 Hard? Send them the page — it installs in ten seconds.</p>
+      <button class="btn ghost wide" data-action="shareApp">${icon('share')} Share the app</button>
     </div>
 
     <div class="card danger-card">
@@ -1749,7 +1824,7 @@ function buildDayCode() {
     v: 1,
     n: S.profile.name || '',
     d: today,
-    c: TASKS.filter(t => taskDone(day, 'me', t)).map(t => t.id),
+    c: activeTasksFor(today).filter(t => taskDone(today, 'me', t)).map(t => t.id),
     w: me.water,
     p: me.pages,
     m: me.cheat ? (me.cheat.occasion || 'occasion') : null,
@@ -1929,10 +2004,11 @@ const ACTIONS = {
   /* checklist */
   toggle(d) {
     const date = d.date, taskId = d.task;
-    const t = TASKS.find(x => x.id === taskId);
+    const t = activeTasksFor(date).find(x => x.id === taskId);
+    if (!t) return;
     const day = ensureDay(date);
     const me = day.me;
-    const done = taskDone(day, 'me', t);
+    const done = taskDone(date, 'me', t);
 
     if (t.type === 'photo') {
       if (me.proofs.photo) { UI.sheet = { type: 'proofViewer', date, task: 'photo', who: 'me' }; renderApp(); }
@@ -1957,23 +2033,23 @@ const ACTIONS = {
     }
     save();
     evaluateAndRender();
-    const now = personDone(ensureDay(date), 'me');
+    const now = personDone(date, 'me');
     if (now && !done) celebrateDay(date);
   },
 
   water(d) {
     const day = ensureDay(d.date);
-    const before = taskDone(day, 'me', TASKS.find(t => t.type === 'water'));
+    const before = taskDone(d.date, 'me', TASKS.find(t => t.type === 'water'));
     day.me.water = Math.max(0, Math.min(999, day.me.water + Number(d.oz)));
     save();
     evaluateAndRender();
     if (!before && day.me.water >= S.settings.waterGoalOz) showToast('A full gallon. Well done.');
-    if (personDone(day, 'me') && !before) celebrateDay(d.date);
+    if (personDone(d.date, 'me') && !before) celebrateDay(d.date);
   },
 
   pages(d) {
     const day = ensureDay(d.date);
-    const wasDone = personDone(day, 'me');
+    const wasDone = personDone(d.date, 'me');
     setPages(d.date, day.me.pages + Number(d.n));
     save();
     evaluateAndRender();
@@ -1981,7 +2057,7 @@ const ACTIONS = {
     if (book && !book.done && book.pagesRead >= book.totalPages) {
       showToast(`You reached the last page of “${book.title}”.`);
     }
-    if (!wasDone && personDone(day, 'me')) celebrateDay(d.date);
+    if (!wasDone && personDone(d.date, 'me')) celebrateDay(d.date);
   },
 
   capture(d) { openCapture(d.date, 'me', d.task); },
@@ -2227,6 +2303,21 @@ const ACTIONS = {
       }
     });
   },
+  addCustomTask() {
+    const title = (($('#ctTitle') || {}).value || '').trim();
+    if (!title) { showToast('Name the commitment first.'); return; }
+    if ((S.customTasks || []).length >= 4) { showToast('Four extra rules is plenty.'); return; }
+    S.customTasks.push({ id: 'c' + uid(), title: title.slice(0, 40), since: todayStr() });
+    save();
+    evaluateAndRender();
+    showToast(`“${title}” joins the list — starting today.`);
+  },
+  removeCustomTask(d) {
+    const i = (S.customTasks || []).findIndex(c => c.id === d.id);
+    if (i >= 0) S.customTasks.splice(i, 1);
+    save();
+    evaluateAndRender();
+  },
   setChallengeMode(d) {
     S.settings.challengeMode = d.v;
     save();
@@ -2284,8 +2375,9 @@ const ACTIONS = {
   partnerToggle(d) {
     const day = ensureDay(d.date);
     const p = day.partner;
-    const t = TASKS.find(x => x.id === d.task);
-    const isDone = taskDone(day, 'partner', t);
+    const t = activeTasksFor(d.date).find(x => x.id === d.task);
+    if (!t) return;
+    const isDone = taskDone(d.date, 'partner', t);
     if (t.type === 'water') p.water = isDone ? 0 : S.settings.waterGoalOz;
     else if (t.type === 'read') p.pages = isDone ? 0 : S.settings.pagesGoal;
     else p.checks[t.id] = !isDone;
@@ -2297,7 +2389,7 @@ const ACTIONS = {
     const code = buildDayCode();
     const day = ensureDay(todayStr());
     const n = dayNumberOf(todayStr());
-    const text = `${S.profile.name || 'I'} — Day ${n} of 75: ${doneCount(todayStr(), 'me')}/${TASKS.length} done${personDone(day, 'me') ? '. Sealed.' : '.'}\n\n${code}`;
+    const text = `${S.profile.name || 'I'} — Day ${n} of 75: ${doneCount(todayStr(), 'me')}/${activeTasks().length} done${personDone(todayStr(), 'me') ? '. Sealed.' : '.'}\n\n${code}`;
     if (navigator.share) {
       navigator.share({ text }).catch(() => {});
     } else {
@@ -2353,6 +2445,12 @@ const ACTIONS = {
   toggleStrict() { S.settings.strictProof = !S.settings.strictProof; save(); evaluateAndRender(); },
   setWaterGoal(d) { S.settings.waterGoalOz = Number(d.v); save(); evaluateAndRender(); },
   setPagesGoal(d) { S.settings.pagesGoal = Number(d.v); save(); evaluateAndRender(); },
+  shareApp() {
+    const url = new URL('./welcome.html', location.href).href;
+    const text = 'Seventy-five days. Six commitments. No mercy. The 75 Hard app we use:';
+    if (navigator.share) navigator.share({ title: 'SEVENTY-FIVE', text, url }).catch(() => {});
+    else navigator.clipboard.writeText(`${text} ${url}`).then(() => showToast('Link copied — send it anywhere.'));
+  },
   exportData() { exportBackup(); },
   importData() { importBackup(); },
   confirmRestart() {
@@ -2501,8 +2599,7 @@ function checkReminders() {
   const key = todayStr() + hhmm;
   if (UI.lastReminder === key) return;
   UI.lastReminder = key;
-  const day = getDay(todayStr());
-  const missing = TASKS.filter(t => !taskDone(day, 'me', t));
+  const missing = activeTasks().filter(t => !taskDone(todayStr(), 'me', t));
   if (!missing.length) return;
   try {
     new Notification('SEVENTY-FIVE', {

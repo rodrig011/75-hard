@@ -75,6 +75,7 @@ const ICONS = {
   chev: '<path d="M9 6l6 6-6 6"/>',
   seal: '<circle cx="12" cy="12" r="8.5"/><path d="M8.2 12.3l2.7 2.7 5-5.4"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8L21 21"/>',
+  barcode: '<path d="M4 7v10M8 7v10M11 7v6M11 16v1M14 7v10M17.5 7v6M17.5 16v1M20 7v10"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.3 3.9 5.2 3.9 8.5s-1.3 6.2-3.9 8.5c-2.6-2.3-3.9-5.2-3.9-8.5s1.3-6.2 3.9-8.5z"/>',
 };
 
@@ -101,7 +102,7 @@ function defaultState() {
     cheat: { allowance: 10, used: [] },
     myFoods: [],
     foodRecents: [],
-    settings: { strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false, nutrition: null },
+    settings: { strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false, nutrition: null, challengeMode: 'hard' },
   };
 }
 
@@ -138,7 +139,7 @@ const UI = {
   sheet: null,       // { type, ...props }
   fixing: null,      // date being retro-completed
   obStep: 0,
-  ob: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', startOpt: 'today', dietName: '' },
+  ob: { name: '', mode: 'solo', partnerName: '', coupleRule: 'together', startOpt: 'today', dietName: '', challengeMode: 'hard' },
   lastToday: todayStr(),
   galleryFor: null,
   foodMeal: 0,
@@ -258,8 +259,10 @@ function doneCount(date, who) {
 
 /* ───────────────────────── Failure / victory engine ───────────────────────── */
 
+const isFlex = () => S.settings.challengeMode === 'flex';
+
 function computeFail() {
-  if (!S.onboarded || S.attempt.status !== 'active') return null;
+  if (!S.onboarded || S.attempt.status !== 'active' || isFlex()) return null;
   const today = todayStr();
   const start = startDate();
   if (diffDays(start, today) <= 0) return null;
@@ -284,7 +287,19 @@ function computeFail() {
 function checkVictory() {
   if (S.attempt.status !== 'active') return;
   const today = todayStr();
-  if (diffDays(startDate(), today) < 74) return;
+  const dayN = diffDays(startDate(), today) + 1;
+  if (dayN < 75) return;
+  if (isFlex()) {
+    if (dayN === 75 && !dayComplete(today)) return;
+    const sealed = countSealedDays();
+    S.attempt.status = 'complete';
+    S.history.push({
+      n: S.attempt.n, start: startDate(), end: addDays(startDate(), 74),
+      days: sealed, note: `Completed — ${sealed} of 75 sealed`,
+    });
+    save();
+    return;
+  }
   for (let i = 0; i < 75; i++) {
     if (!dayComplete(addDays(startDate(), i))) return;
   }
@@ -525,6 +540,16 @@ function renderOnboarding() {
         <button class="seg-opt ${ob.startOpt === 'today' ? 'on' : ''}" data-action="obStart" data-start="today">Today</button>
         <button class="seg-opt ${ob.startOpt === 'tomorrow' ? 'on' : ''}" data-action="obStart" data-start="tomorrow">Tomorrow</button>
       </div>
+      <div class="rule-pick">
+        <button class="rule-opt ${ob.challengeMode !== 'flex' ? 'on' : ''}" data-action="obChallengeMode" data-v="hard">
+          <strong>75 Hard — the real thing</strong>
+          <span>Miss a single task and you go back to Day One. No mercy.</span>
+        </button>
+        <button class="rule-opt ${ob.challengeMode === 'flex' ? 'on' : ''}" data-action="obChallengeMode" data-v="flex">
+          <strong>Flexible — keep the streak human</strong>
+          <span>A missed day is recorded, not punished. The 75 days keep counting.</span>
+        </button>
+      </div>
       <div class="commit-card">
         <p>“For the next seventy-five days I will keep every commitment on this list, every day, with proof — or I will go back to Day One and begin again.”</p>
         <div class="commit-sig serif">${esc(ob.name || 'Signed')}${ob.mode === 'couple' && ob.partnerName ? ` &amp; ${esc(ob.partnerName)}` : ''}</div>
@@ -618,11 +643,19 @@ function renderToday() {
       <button class="iconbtn" data-action="dismissInstallHint" aria-label="Dismiss">${icon('close')}</button>
     </div>` : '';
 
+  const yesterday = addDays(today, -1);
+  const flexSlip = !isFixing && isFlex() && dayNumberOf(yesterday) >= 1 && !dayComplete(yesterday);
+
   return `
     ${isFixing ? `
       <div class="fixing-banner">
         <strong>Completing yesterday's log</strong> — be honest with yourself.
         <button class="btn small ghost" data-action="stopFixing">Back to today</button>
+      </div>` : ''}
+    ${flexSlip ? `
+      <div class="fixing-banner">
+        <span><strong>Yesterday slipped.</strong> It's recorded — today is what counts.</span>
+        <button class="btn small ghost" data-action="fixYesterday" data-date="${yesterday}">Fix the log</button>
       </div>` : ''}
     <header class="appheader">
       <div class="header-row">
@@ -790,11 +823,16 @@ function renderJourney() {
   const today = todayStr();
   const curN = Math.min(Math.max(currentDayN(), 0), 76);
   let cells = '';
+  let missedCount = 0;
   for (let i = 1; i <= 75; i++) {
     const date = addDays(startDate(), i - 1);
     let cls = 'future';
-    if (i < curN && dayComplete(date)) cls = 'done';
-    else if (i === curN) cls = dayComplete(date) ? 'done today' : 'today';
+    if (i < curN) {
+      if (dayComplete(date)) cls = 'done';
+      else { cls = 'missed'; missedCount++; }
+    } else if (i === curN) {
+      cls = dayComplete(date) ? 'done today' : 'today';
+    }
     cells += `<div class="cell ${cls}" title="Day ${i}">${i === curN ? i : ''}</div>`;
   }
 
@@ -811,6 +849,7 @@ function renderJourney() {
       <div class="grid-legend">
         <span><i class="dot done"></i>Sealed</span>
         <span><i class="dot today"></i>Today</span>
+        ${missedCount ? `<span><i class="dot missed"></i>Missed</span>` : ''}
         <span><i class="dot"></i>Ahead</span>
       </div>
     </div>
@@ -1013,6 +1052,16 @@ function renderMore() {
 
     <div class="card">
       <div class="card-head"><strong>Rules</strong></div>
+      <div class="rule-pick">
+        <button class="rule-opt ${!isFlex() ? 'on' : ''}" data-action="setChallengeMode" data-v="hard">
+          <strong>75 Hard — the real thing</strong>
+          <span>Miss a single task and you go back to Day One.</span>
+        </button>
+        <button class="rule-opt ${isFlex() ? 'on' : ''}" data-action="setChallengeMode" data-v="flex">
+          <strong>Flexible — keep the streak human</strong>
+          <span>A missed day is recorded, not punished. The count continues.</span>
+        </button>
+      </div>
       <div class="row-setting">
         <div><strong>Require proof</strong><div class="muted small">Workouts and reading need a photo before they count.</div></div>
         <button class="switch ${S.settings.strictProof ? 'on' : ''}" data-action="toggleStrict" role="switch" aria-checked="${S.settings.strictProof}"><i></i></button>
@@ -1201,6 +1250,7 @@ function renderSheet() {
       <div class="food-search-wrap">
         ${icon('search')}
         <input class="input" id="foodSearch" type="search" placeholder="Search foods — chicken, latte, tacos…" maxlength="60" autocomplete="off" value="${esc(UI.foodQuery || '')}">
+        <button class="scan-btn" data-action="openScanner" aria-label="Scan a barcode">${icon('barcode')}</button>
       </div>
       <ul class="food-results" id="foodResults"></ul>
       ${UI.foodCustomOpen ? `
@@ -1391,6 +1441,21 @@ function updateFoodResults(webRows) {
     box.innerHTML = FOOD_RESULTS.length
       ? `<div class="food-sect">Recent</div>` + FOOD_RESULTS.map(foodResultRow).join('')
       : `<p class="food-empty">Search the built-in food library, or your own saved foods. Recents will appear here.</p>`;
+    return;
+  }
+
+  if (/^\d{8,14}$/.test(q)) {
+    FOOD_RESULTS = webRows || [];
+    box.innerHTML =
+      FOOD_RESULTS.map(foodResultRow).join('') +
+      (FOOD_RESULTS.length ? '' : `
+        <li>
+          <button class="food-result web" data-action="lookupCode" id="codeLookupBtn">
+            <span class="fr-add">${icon('barcode')}</span>
+            <span class="fr-body"><span class="fr-name">Look up barcode ${esc(q)}</span>
+            <span class="fr-sub">Open Food Facts product database</span></span>
+          </button>
+        </li>`);
     return;
   }
 
@@ -1616,6 +1681,7 @@ const ACTIONS = {
     UI.ob.coupleRule = d.rule; renderApp();
   },
   obStart(d) { UI.ob.startOpt = d.start; renderApp(); },
+  obChallengeMode(d) { UI.ob.challengeMode = d.v; renderApp(); },
   obFinish() {
     const ob = UI.ob;
     S.profile.name = ob.name;
@@ -1623,6 +1689,7 @@ const ACTIONS = {
     S.profile.partnerName = ob.mode === 'couple' ? ob.partnerName : '';
     S.profile.coupleRule = ob.coupleRule;
     S.profile.dietName = ob.dietName;
+    S.settings.challengeMode = ob.challengeMode;
     S.attempt = {
       n: 1,
       startDate: ob.startOpt === 'tomorrow' ? addDays(todayStr(), 1) : todayStr(),
@@ -1791,6 +1858,31 @@ const ACTIONS = {
     renderApp();
     showToast(`“${name}” saved to your foods.`);
   },
+  openScanner() {
+    const date = (UI.sheet && UI.sheet.date) || todayStr();
+    Scanner.open(food => {
+      const day = ensureDay(date);
+      day.me.food.push({
+        id: uid(), name: food.name, serving: food.serving, qty: 1,
+        kcal: food.kcal, p: food.p, c: food.c, f: food.f,
+        meal: MEALS[UI.foodMeal || 0],
+      });
+      pushRecentFood(food);
+      save();
+      renderApp();
+      showToast(`${food.name} — logged.`);
+    }, showToast);
+  },
+  lookupCode() {
+    const q = (UI.foodQuery || '').trim();
+    const btn = $('#codeLookupBtn');
+    if (btn) btn.querySelector('.fr-name').textContent = 'Looking it up…';
+    Scanner.lookupBarcode(q).then(food => {
+      if ((UI.foodQuery || '').trim() !== q) return;
+      if (!food) { showToast('No product found for that barcode.'); updateFoodResults([]); return; }
+      updateFoodResults([food]);
+    }).catch(() => showToast('No connection — the built-in library still works.'));
+  },
   searchOnline() {
     const btn = $('#webSearchBtn');
     if (btn) btn.querySelector('.fr-name').textContent = 'Searching…';
@@ -1862,6 +1954,12 @@ const ACTIONS = {
     save();
     renderApp();
     showToast(`Your day: ${n.targetKcal.toLocaleString()} kcal.`);
+  },
+  setChallengeMode(d) {
+    S.settings.challengeMode = d.v;
+    save();
+    evaluateAndRender();
+    showToast(d.v === 'flex' ? 'Flexible mode — misses are recorded, not punished.' : 'Hard mode. The rules are the rules.');
   },
   setCheatAllowance(d) {
     const v = Number(d.v);

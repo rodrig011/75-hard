@@ -33,6 +33,12 @@ with its occasion and shown as spent.
   macros, search millions more online via Open Food Facts, adjust portions, re-log
   recents in one tap, and save your own custom foods. Protein/carbs/fat totals roll
   up on the diet card.
+- **Barcode scanning** — point the camera at a product barcode (native
+  BarcodeDetector where available, with a built-in EAN-13/UPC decoder as fallback)
+  or type the digits, and the product is fetched from Open Food Facts and logged.
+- **Two disciplines** — *75 Hard* (miss a task, back to Day One) or *Flexible*
+  (a missed day is recorded in the journey, the count keeps going). Chosen at
+  onboarding, changeable in settings.
 - **The change** — day-by-day progress pictures build into a before/after comparison
   and a full-screen time-lapse reel of your transformation, shown on the Journey
   screen and again when you finish all 75 days.

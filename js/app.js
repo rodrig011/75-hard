@@ -355,9 +355,9 @@ const MILESTONES = [
 /* ── Theme ── */
 
 function applyTheme() {
-  const t = S.settings.theme || 'system';
-  if (t === 'system') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = t;
+  const t = S.settings.theme || 'dark';
+  if (t === 'light' || t === 'hardcore') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
 }
 
 function doneCount(date, who) {
@@ -925,8 +925,11 @@ function renderTaskRow(date, me, t) {
       : 'Your structured diet — zero alcohol, zero deviations.';
   }
 
+  const tint = t.custom ? 'custom'
+    : (t.id === 'workout1' || t.id === 'workout2') ? 'workout'
+    : (t.type || 'workout');
   return `
-    <li class="card task ${isDone ? 'done' : ''}">
+    <li class="card task tint-${tint} ${isDone ? 'done' : ''}">
       <div class="task-main">
         <button class="task-check ${isDone ? 'on' : ''}" data-action="toggle" data-date="${date}" data-task="${t.id}" aria-label="${esc(t.title)}">
           ${icon('check')}
@@ -984,10 +987,10 @@ function renderJourney() {
       </div>
     </div>
     <div class="stat-row">
-      <div class="stat"><div class="stat-v serif">${sealedDays}</div><div class="stat-l">Days sealed</div></div>
-      <div class="stat"><div class="stat-v serif">${currentChain()}</div><div class="stat-l">Chain</div></div>
-      <div class="stat"><div class="stat-v serif">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
-      <div class="stat"><div class="stat-v serif">${totalPages}</div><div class="stat-l">Pages read</div></div>
+      <div class="stat"><div class="stat-v serif" style="color:var(--green)">${sealedDays}</div><div class="stat-l">Days sealed</div></div>
+      <div class="stat"><div class="stat-v serif" style="color:var(--t-diet)">${currentChain()}</div><div class="stat-l">Chain</div></div>
+      <div class="stat"><div class="stat-v serif" style="color:var(--gold)">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
+      <div class="stat"><div class="stat-v serif" style="color:var(--t-read)">${totalPages}</div><div class="stat-l">Pages read</div></div>
     </div>
     ${renderNutriInsights()}
     <div class="card">
@@ -1062,7 +1065,7 @@ function renderNutriInsights() {
             <span class="nutri-bar ${target && d.kcal > target ? 'over' : ''}" style="height:${Math.max(4, Math.round((d.kcal / max) * 72))}px"></span>
             <span class="nutri-day">${parseDate(d.date).toLocaleDateString(undefined, { weekday: 'narrow' })}</span>
           </button>`).join('')}
-        ${target ? `<div class="nutri-target" style="bottom:${Math.min(92, Math.round((target / max) * 72) + 20)}px"></div>` : ''}
+        ${target && target < max * 0.95 ? `<div class="nutri-target" style="bottom:${Math.round((target / max) * 72) + 20}px"></div>` : ''}
       </div>
       ${target ? `<p class="muted small">Average ${avg.toLocaleString()} kcal against a ${target.toLocaleString()} target. Tap a day to see its plate.</p>`
         : `<p class="muted small">Tap a day to see its plate. Set a calorie target in More for the full picture.</p>`}
@@ -1209,10 +1212,12 @@ function renderMore() {
     <div class="card">
       <div class="card-head"><strong>Appearance</strong></div>
       <div class="seg">
-        ${[['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark'], ['hardcore', 'Hardcore']].map(([v, l]) =>
-          `<button class="seg-opt ${(S.settings.theme || 'system') === v ? 'on' : ''}" data-action="setTheme" data-v="${v}">${l}</button>`).join('')}
+        ${[['dark', 'Dark'], ['light', 'Light'], ['hardcore', 'Hardcore']].map(([v, l]) => {
+          const cur = S.settings.theme === 'system' ? 'dark' : (S.settings.theme || 'dark');
+          return `<button class="seg-opt ${cur === v ? 'on' : ''}" data-action="setTheme" data-v="${v}">${l}</button>`;
+        }).join('')}
       </div>
-      <p class="muted small" style="margin-top:10px">Hardcore is black and gold. No softness anywhere.</p>
+      <p class="muted small" style="margin-top:10px">Dark is the signature look. Hardcore is black and gold — no softness anywhere.</p>
     </div>
 
     <div class="card">

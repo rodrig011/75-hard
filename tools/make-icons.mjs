@@ -78,13 +78,13 @@ const RING_W = 0.014;
 
 function lerp(a, b, t) { return a + (b - a) * t; }
 
-// Eucalyptus vertical gradient for the mark.
+// Volt-lime vertical gradient for the mark.
 function gold(v) {
   const t = Math.max(0, Math.min(1, (v - 0.24) / 0.52));
   return [
-    lerp(0x5d, 0x35, t),
-    lerp(0x84, 0x54, t),
-    lerp(0x71, 0x45, t),
+    lerp(0xe9, 0xbe, t),
+    lerp(0xff, 0xe3, t),
+    lerp(0x8a, 0x2f, t),
   ];
 }
 
@@ -100,9 +100,9 @@ function render(size) {
           const v = (y + (sy + 0.5) / SS) / size;
           const dc = Math.hypot(u - 0.5, v - 0.42);
           const t = Math.min(1, dc / 0.72);
-          let pr = lerp(0xf9, 0xea, t);
-          let pg = lerp(0xf6, 0xe3, t);
-          let pb = lerp(0xef, 0xd2, t);
+          let pr = lerp(0x18, 0x06, t);
+          let pg = lerp(0x1a, 0x07, t);
+          let pb = lerp(0x17, 0x06, t);
 
           const aa = 1 / size;
           const [gr, gg, gb] = gold(v);

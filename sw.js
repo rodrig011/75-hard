@@ -1,7 +1,7 @@
 /* SEVENTY-FIVE service worker — cache-first app shell so it works fully offline. */
 'use strict';
 
-const CACHE = 'seventyfive-v9';
+const CACHE = 'seventyfive-v10';
 const ASSETS = [
   './',
   './index.html',

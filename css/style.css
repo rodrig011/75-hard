@@ -128,10 +128,11 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-html { height: 100%; }
+html { height: 100%; overflow-x: hidden; }
 
 body {
   height: 100%;
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
@@ -184,6 +185,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   padding: calc(env(safe-area-inset-top, 0px) + 22px) 18px 32px;
 }
@@ -1337,7 +1339,7 @@ body::after {
 .hero::before {
   content: '';
   position: absolute;
-  inset: -60px -40px auto;
+  inset: -60px 0 auto;
   height: 75%;
   background: radial-gradient(60% 80% at 72% 18%,
     color-mix(in srgb, var(--green) calc(10% + var(--p, 0) * 26%), transparent), transparent 70%);

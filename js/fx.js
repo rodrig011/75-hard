@@ -108,15 +108,33 @@ const FX = (() => {
       <div class="seal-hint">Tap to continue</div>`;
     document.body.appendChild(ov);
 
-    // fanfare
-    const seq = big ? [392, 523, 659, 784, 1046] : [523, 659, 784];
-    seq.forEach((f, i) => tone(f, i * 0.11, 0.5, 'triangle', 0.09));
-    tone(seq[seq.length - 1] * 2, seq.length * 0.11, 0.8, 'sine', 0.04);
-    vibrate(big ? [40, 60, 40, 60, 120] : [30, 40, 80]);
+    // Each tier has its own ceremony. Ordinary days stay quiet — a coin, two notes,
+    // a ring of light. Confetti is reserved for the milestones.
+    const tier = opts.tier || 0;
+    const SEQS = [
+      [523, 784],
+      [523, 659, 784],
+      [440, 554, 659, 880],
+      [392, 523, 659, 784, 1046],
+    ];
+    const seq = SEQS[Math.min(tier, 3)];
+    seq.forEach((f, i) => tone(f, i * 0.12, 0.55, 'triangle', tier ? 0.09 : 0.06));
+    tone(seq[seq.length - 1] * 2, seq.length * 0.12, 0.9, 'sine', tier ? 0.045 : 0.025);
+    vibrate(tier ? [40, 60, 40, 60, 120] : [25, 40, 60]);
 
     setTimeout(() => {
-      confetti(big ? [accent, '#e9d5a6', '#ff5c8a', '#41b7f8'] : [accent, '#ffffff']);
-      if (big) setTimeout(() => confetti([accent, '#e9d5a6']), 500);
+      if (tier === 0) {
+        spawn(window.innerWidth / 2, window.innerHeight / 2 - 60, accent, 22, 150);
+      } else if (tier === 1) {
+        confetti([accent, '#ffffff']);
+      } else if (tier === 2) {
+        confetti([accent, '#e9d5a6']);
+        setTimeout(() => confetti([accent, '#e9d5a6']), 500);
+      } else {
+        confetti(['#e9d5a6', '#d5b87f', accent]);
+        setTimeout(() => confetti(['#e9d5a6', '#d5b87f']), 450);
+        setTimeout(() => confetti(['#e9d5a6', accent]), 900);
+      }
     }, 550);
 
     let closed = false;
@@ -127,7 +145,7 @@ const FX = (() => {
       setTimeout(() => { ov.remove(); if (onClose) onClose(); }, 320);
     };
     ov.addEventListener('click', close);
-    setTimeout(close, big ? 4200 : 3200);
+    setTimeout(close, big ? 4200 : 2800);
   }
 
   /* ── Share card (Wrapped-style) ── */
@@ -183,6 +201,27 @@ const FX = (() => {
       x.fillStyle = 'rgba(255,255,255,.55)';
       x.font = `600 44px ${F}`;
       x.fillText(s.name, cx, 990);
+    }
+
+    // last-seven-days seal row
+    if (s.week && s.week.length === 7) {
+      const r = 34, gap2 = 92, x0 = cx - gap2 * 3;
+      s.week.forEach((sealed, i) => {
+        const px = x0 + i * gap2;
+        const py = 810;
+        if (sealed) {
+          const cg = x.createLinearGradient(px - r, py - r, px + r, py + r);
+          cg.addColorStop(0, '#ffffff');
+          cg.addColorStop(0.25, accent);
+          cg.addColorStop(1, accent);
+          x.fillStyle = cg;
+          x.beginPath(); x.arc(px, py, r, 0, Math.PI * 2); x.fill();
+        } else {
+          x.strokeStyle = 'rgba(255,255,255,.18)';
+          x.lineWidth = 3;
+          x.beginPath(); x.arc(px, py, r - 2, 0, Math.PI * 2); x.stroke();
+        }
+      });
     }
 
     const stats = s.stats || [];

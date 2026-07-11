@@ -395,6 +395,30 @@ const ACCENTS = [
   ['legend', 'Legend', 75],
 ];
 
+/* ── Time of day ── */
+
+function daypart() {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 11) return 'morning';
+  if (h >= 11 && h < 17) return 'day';
+  if (h >= 17 && h < 22) return 'evening';
+  return 'night';
+}
+
+function applyDaypart() {
+  document.documentElement.dataset.daypart = daypart();
+}
+
+function heroPhrase(allDone, dayN) {
+  if (allDone) return dayN >= 75 ? 'The last page is written.' : `Day ${dayN} is in the archive. Rest.`;
+  switch (daypart()) {
+    case 'morning': return 'The day is unwritten. Start with the hard thing.';
+    case 'day': return 'Midday. Stay on schedule — the evening should be easy.';
+    case 'evening': return 'Evenings decide challenges. Finish clean.';
+    default: return 'Almost midnight. Seal it, then sleep.';
+  }
+}
+
 /* ── Theme ── */
 
 function applyTheme() {
@@ -589,6 +613,11 @@ function renderApp() {
     html = renderOnboarding();
   } else if (S.attempt.status === 'complete' && !UI.browsingAfterWin) {
     html = renderVictory();
+    if (!UI.winFxDone) {
+      UI.winFxDone = true;
+      setTimeout(() => FX.confetti(['#e9d5a6', '#d5b87f', getComputedStyle(document.documentElement).getPropertyValue('--green').trim()]), 600);
+      setTimeout(() => FX.confetti(['#e9d5a6', '#ffffff']), 1400);
+    }
   } else {
     html = renderMain();
   }
@@ -749,7 +778,7 @@ function renderMain() {
 
   return `
     <div class="screen">
-      <main class="content">${body}</main>
+      <main class="content ${UI.enterAnim ? 'enter' : ''}">${body}</main>
       <nav class="tabbar">
         ${tabs.map(t => `
           <button class="tab-item ${UI.tab === t.id ? 'active' : ''}" data-action="tab" data-tab="${t.id}">
@@ -815,12 +844,15 @@ function renderToday() {
         <span><strong>Yesterday slipped.</strong> It's recorded — today is what counts.</span>
         <button class="btn small ghost" data-action="fixYesterday" data-date="${yesterday}">Fix the log</button>
       </div>` : ''}
-    <section class="hero-card ${allDone ? 'is-sealed' : ''}">
+    <section class="hero ${sealed ? 'is-sealed' : ''}" style="--p:${pct.toFixed(3)};--chain:${Math.min(currentChain(), 30)}">
       <div class="kicker">${prettyDate(editDate)} · Attempt ${roman(S.attempt.n)}</div>
       <div class="hero-mid">
         <div class="hero-left">
           <h1 class="serif hero-num">Day ${dayN}</h1>
-          <div class="muted hero-status">${allDone ? 'Everything is done.<br>Sealed.' : `${done} of ${dayTasks.length} complete<br><span id="countdown">${countdownText()}</span>`}</div>
+          <div class="muted hero-status">${sealed ? 'Sealed.' :
+            allDone && isCouple() && S.profile.coupleRule === 'together'
+              ? `Your side is done.<br>Waiting on ${esc(S.profile.partnerName || 'your partner')}.`
+              : `${done} of ${dayTasks.length} complete<br><span id="countdown">${countdownText()}</span>`}</div>
           ${currentChain() >= 2 ? `<div class="chain-line">${icon('seal')} ${currentChain()}-day chain</div>` : ''}
         </div>
         <div class="ring-wrap hero-ring" aria-hidden="true">
@@ -832,38 +864,30 @@ function renderToday() {
           <div class="ring-label"><span class="serif">${done}/${dayTasks.length}</span><small>today</small></div>
         </div>
       </div>
-      ${S.profile.why ? `<p class="hero-why">“${esc(S.profile.why)}”</p>` : ''}
+      <div class="hero-foot">
+        <p class="hero-phrase">${heroPhrase(sealed, dayN)}</p>
+        ${S.profile.why ? `<p class="hero-why">“${esc(S.profile.why)}”</p>` : ''}
+      </div>
     </section>
     ${installHint}
-    ${sealed ? `
-      <div class="card seal-card">
-        ${icon('seal', 'seal-ic')}
-        <div>
-          <strong class="serif">Day ${dayN} sealed.</strong>
-          <p class="muted small">${dayN === 75 ? 'This was the last one.' : `${75 - dayN} days remain. See you tomorrow.`}</p>
-        </div>
-      </div>` :
-    allDone && isCouple() && S.profile.coupleRule === 'together' ? `
-      <div class="card wait-card">
-        ${icon('rings')}
-        <div>
-          <strong>Your side is done.</strong>
-          <p class="muted small">Waiting on ${esc(S.profile.partnerName || 'your partner')} — the day seals when you both finish.</p>
-        </div>
-      </div>` : ''}
     <ul class="tasklist">
       ${dayTasks.map(t => renderTaskRow(editDate, me, t)).join('')}
     </ul>
     <div class="card journal-card">
-      <div class="card-head"><strong>Tonight's page</strong><span class="muted small">just for you</span></div>
+      <div class="card-head"><strong>Tonight's page</strong><span class="muted small">the archive remembers</span></div>
       <textarea class="input" data-journal="${editDate}" rows="3" placeholder="How did the day actually go?">${esc(me.note || '')}</textarea>
+      <div class="mood-row">
+        ${[['1', 'Rough'], ['2', 'Low'], ['3', 'Steady'], ['4', 'Good'], ['5', 'Strong']].map(([v, l]) => `
+          <button class="mood-dot ${String(me.mood) === v ? 'on' : ''}" data-action="setMood" data-date="${editDate}" data-v="${v}" aria-label="${l}">
+            <i style="opacity:${0.25 + Number(v) * 0.15}"></i><span>${l}</span>
+          </button>`).join('')}
+      </div>
       <div class="weight-row">
         <label class="muted small" for="dayWeight">Weight today (optional)</label>
         <input class="input slim" id="dayWeight" type="number" inputmode="decimal" placeholder="—"
           data-weight="${editDate}" value="${me.weight || ''}" min="50" max="700"> <span class="muted small">lb</span>
       </div>
-    </div>
-    <p class="footnote">${isFlex() ? 'A missed day is recorded, never erased. Show up anyway.' : 'Miss a single item and the count returns to zero. The rules are the rules.'}</p>`;
+    </div>`;
 }
 
 function renderTaskRow(date, me, t) {
@@ -1025,21 +1049,13 @@ function renderJourney() {
   const sealedDays = countSealedDays();
 
   const life = lifetimeStats();
-  const nextPct = life.next ? Math.min(100, (life.score / life.next[0]) * 100) : 100;
 
   return `
     <header class="appheader">
-      <div class="kicker">The record</div>
+      <div class="kicker">The record · ${esc(life.level)}</div>
       <h1 class="serif page-title">Journey</h1>
+      <p class="muted">${life.score.toLocaleString()} discipline${life.next ? ` — ${(life.next[0] - life.score).toLocaleString()} to ${life.next[1]}` : ' — the top of the mountain'}</p>
     </header>
-    <div class="card score-card">
-      <div class="card-head"><strong>Discipline Score</strong><span class="badge-gold">${esc(life.level)}</span></div>
-      <div class="score-num serif">${life.score.toLocaleString()}</div>
-      <div class="bar"><div class="bar-fill" style="width:${nextPct.toFixed(1)}%"></div></div>
-      <p class="muted small" style="margin-top:8px">${life.next
-        ? `${(life.next[0] - life.score).toLocaleString()} points to ${life.next[1]}. Every sealed day is 10; a finished 75 is 500.`
-        : 'The top of the mountain. Stay there.'}</p>
-    </div>
     <div class="card">
       <div class="grid75">${cells}</div>
       <div class="grid-legend">
@@ -1049,41 +1065,6 @@ function renderJourney() {
         <span><i class="dot"></i>Ahead</span>
       </div>
     </div>
-    <div class="stat-row">
-      <div class="stat"><div class="stat-v serif" style="color:var(--green)">${sealedDays}</div><div class="stat-l">Days sealed</div></div>
-      <div class="stat"><div class="stat-v serif" style="color:var(--t-diet)">${currentChain()}</div><div class="stat-l">Chain</div></div>
-      <div class="stat"><div class="stat-v serif" style="color:var(--gold)">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
-      <div class="stat"><div class="stat-v serif" style="color:var(--t-read)">${totalPages}</div><div class="stat-l">Pages read</div></div>
-    </div>
-    ${renderCoach()}
-    ${renderNutriInsights()}
-    ${renderYearHeatmap()}
-    <div class="duo">
-      <button class="btn primary" data-action="shareCardBtn">${icon('share')} Share my card</button>
-      <button class="btn ghost" data-action="sheet" data-sheet="legacy">Legacy timeline</button>
-    </div>
-    <div class="card">
-      <div class="card-head"><strong>Milestones</strong></div>
-      <div class="medals">
-        ${[10, 25, 50, 75].map(n => `
-          <div class="medal ${sealedDays >= n ? 'earned' : ''}">
-            <span class="serif">${n}</span>
-            <small>${sealedDays >= n ? 'earned' : 'ahead'}</small>
-          </div>`).join('')}
-      </div>
-    </div>
-    ${renderTrophyRoom()}
-    ${S.reflections.length ? `
-      <div class="card">
-        <div class="card-head"><strong>Weekly reflections</strong></div>
-        <ul class="list">
-          ${S.reflections.slice().reverse().map(r => `
-            <li class="row reflect-row">
-              <div><strong>Week ${r.week}</strong>
-              <div class="muted small">${esc(r.text)}</div></div>
-            </li>`).join('')}
-        </ul>
-      </div>` : ''}
     <div class="card" id="transformBox" hidden></div>
     <div class="card">
       <div class="card-head">
@@ -1092,20 +1073,13 @@ function renderJourney() {
       </div>
       <div class="strip" id="photoStrip"><span class="muted small strip-empty">Your daily pictures will line up here.</span></div>
     </div>
-    ${S.history.length ? `
-      <div class="card">
-        <div class="card-head"><strong>Past attempts</strong></div>
-        <ul class="list">
-          ${S.history.slice().reverse().map(h => `
-            <li class="row">
-              <div>
-                <strong>Attempt ${roman(h.n)}</strong>
-                <div class="muted small">${shortDate(h.start)} — ${shortDate(h.end)} · ${h.days} day${h.days === 1 ? '' : 's'}</div>
-              </div>
-              <span class="muted small">${esc(h.note)}</span>
-            </li>`).join('')}
-        </ul>
-      </div>` : ''}`;
+    ${renderNutriInsights()}
+    ${renderCoach()}
+    <div class="duo">
+      <button class="btn primary" data-action="sheet" data-sheet="legacy">Open the archive</button>
+      <button class="btn ghost" data-action="shareCardBtn">${icon('share')} Share my card</button>
+    </div>
+    ${renderTrophyRoom()}`;
 }
 
 function renderNutriInsights() {
@@ -1246,35 +1220,25 @@ function renderTrophyRoom() {
   const life = lifetimeStats();
   const finishedBooks = S.books.filter(b => b.done).length;
   const totalPages = S.books.reduce((a, b) => a + (b.pagesRead || 0), 0);
-  const completedRuns = S.history.filter(h => /Completed/.test(h.note || ''));
   const trophies = [
-    ['First Seal', 'Seal one day', life.sealed >= 1],
-    ['One Week', '7 days sealed', life.sealed >= 7],
-    ['Iron Month', '30 days sealed', life.sealed >= 30],
-    ['Half Century', '50 days sealed', life.sealed >= 50],
-    ['The 75', 'Finish a full run', life.completions >= 1],
-    ['Chainsmith', 'A 14-day chain', currentChain() >= 14],
-    ['Bookworm', 'Finish a book', finishedBooks >= 1],
-    ['Scholar', '500 pages read', totalPages >= 500],
+    ['First Seal', 'The first day you finished everything.', life.sealed >= 1],
+    ['One Week', 'Seven sealed days. The chain exists.', life.sealed >= 7],
+    ['Iron Month', 'Thirty days of kept promises.', life.sealed >= 30],
+    ['Half Century', 'Fifty. Past the point of doubt.', life.sealed >= 50],
+    ['The 75', 'A full run, start to finish.', life.completions >= 1],
+    ['Chainsmith', 'Fourteen days without a single miss.', currentChain() >= 14],
+    ['Bookworm', 'A book finished inside the challenge.', finishedBooks >= 1],
+    ['Scholar', 'Five hundred pages while everyone scrolled.', totalPages >= 500],
   ];
   return `
     <div class="card">
       <div class="card-head"><strong>Trophy Room</strong><span class="muted small">${trophies.filter(t => t[2]).length} of ${trophies.length}</span></div>
-      ${completedRuns.length ? `
-        <div class="sanctuary">
-          ${completedRuns.map(h => `
-            <div class="plaque">
-              <div class="plaque-num serif">75</div>
-              <div><strong>Attempt ${roman(h.n)}</strong>
-              <div class="muted small">${shortDate(h.start)} — ${shortDate(h.end)}</div></div>
-            </div>`).join('')}
-        </div>` : ''}
       <div class="trophies">
-        ${trophies.map(([name, how, earned]) => `
+        ${trophies.map(([name, story, earned]) => `
           <div class="trophy ${earned ? 'earned' : ''}">
             <div class="trophy-cup">${icon('seal')}</div>
             <strong>${name}</strong>
-            <span>${how}</span>
+            <span>${earned ? story : '· · ·'}</span>
           </div>`).join('')}
       </div>
     </div>`;
@@ -1847,6 +1811,7 @@ function renderSheet() {
   }
 
   if (sh.type === 'legacy') {
+    const MOOD_WORDS = { 1: 'A rough one', 2: 'A low day', 3: 'Steady', 4: 'A good day', 5: 'Strong' };
     const dayN = Math.max(1, Math.min(currentDayN(), 75));
     const rows = [];
     for (let i = dayN; i >= 1; i--) {
@@ -1854,28 +1819,47 @@ function renderSheet() {
       const me = getDay(date).me;
       if (!me) continue;
       const pid = me.proofs && me.proofs.photo;
+      const workouts = Object.values(me.workouts || {}).filter(w => w.kind)
+        .map(w => `${w.kind} ${w.mins || 45}′`).join(' + ');
       const meta = [
+        me.mood ? MOOD_WORDS[me.mood] : '',
+        workouts,
         me.weight ? `${me.weight} lb` : '',
         (me.food || []).length ? `${kcalEaten(me).toLocaleString()} kcal` : '',
-        me.pages ? `${me.pages} pp` : '',
         me.water ? `${me.water} oz` : '',
       ].filter(Boolean).join(' · ');
+      const refl = i % 7 === 0 ? S.reflections.find(r => r.week === i / 7) : null;
       rows.push(`
-        <li class="tl-row">
+        <li class="tl-row ${pid ? 'has-photo' : ''}">
           <div class="tl-day ${dayComplete(date) ? 'done' : ''}"><span class="serif">${i}</span></div>
           <div class="tl-body">
             <div class="tl-date">${prettyDate(date)}</div>
             ${meta ? `<div class="muted small">${meta}</div>` : ''}
+            ${pid ? `<img class="tl-photo-big" data-proof-src="${esc(pid)}" alt="Day ${i}">` : ''}
             ${me.note ? `<div class="tl-note">${esc(me.note)}</div>` : ''}
           </div>
-          ${pid ? `<img class="tl-photo" data-proof-src="${esc(pid)}" alt="">` : ''}
-        </li>`);
+        </li>
+        ${refl ? `
+          <li class="tl-reflect">
+            <div class="kicker">Week ${refl.week} — looking back</div>
+            <p>“${esc(refl.text)}”</p>
+          </li>` : ''}`);
     }
     inner = `
-      <div class="sheet-title serif">Legacy — Attempt ${roman(S.attempt.n)}</div>
-      <p class="muted small">Every day of this run: pictures, notes, weight, fuel.</p>
+      <div class="sheet-title serif">The Archive</div>
+      <p class="muted small">Attempt ${roman(S.attempt.n)} — every picture, every word, every number. Nothing is lost here.</p>
+      ${S.history.length ? `
+        <div class="sanctuary">
+          ${S.history.slice().reverse().map(h => `
+            <div class="plaque">
+              <div class="plaque-num serif">${/Completed/.test(h.note || '') ? '75' : h.days}</div>
+              <div><strong>Attempt ${roman(h.n)}</strong>
+              <div class="muted small">${shortDate(h.start)} — ${shortDate(h.end)} · ${esc(h.note)}</div></div>
+            </div>`).join('')}
+        </div>` : ''}
       <ul class="tl">${rows.join('')}</ul>
-      <button class="btn ghost wide" data-action="closeSheet">Close</button>`;
+      ${renderYearHeatmap()}
+      <button class="btn ghost wide" data-action="closeSheet">Close the archive</button>`;
   }
 
   if (sh.type === 'confirm') {
@@ -2221,7 +2205,12 @@ function setPages(date, newPages) {
 }
 
 const ACTIONS = {
-  tab(d) { UI.tab = d.tab; renderApp(); },
+  tab(d) {
+    if (UI.tab !== d.tab) UI.enterAnim = true;
+    UI.tab = d.tab;
+    renderApp();
+    UI.enterAnim = false;
+  },
   dismissInstallHint() { S.settings.installHintDismissed = true; save(); renderApp(); },
 
   /* onboarding */
@@ -2537,6 +2526,12 @@ const ACTIONS = {
     renderApp();
     showToast(`Your day: ${n.targetKcal.toLocaleString()} kcal.`);
   },
+  setMood(d) {
+    const day = ensureDay(d.date);
+    day.me.mood = day.me.mood === Number(d.v) ? null : Number(d.v);
+    save();
+    renderApp();
+  },
   setWorkoutKind(d) {
     const day = ensureDay(d.date);
     const w = day.me.workouts[d.task] || (day.me.workouts[d.task] = { mins: 45 });
@@ -2631,7 +2626,10 @@ const ACTIONS = {
     const life = lifetimeStats();
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--green').trim();
     const totalPages = S.books.reduce((a, b) => a + (b.pagesRead || 0), 0);
+    const week = [];
+    for (let i = 6; i >= 0; i--) week.push(dayComplete(addDays(todayStr(), -i)));
     FX.shareCard({
+      week,
       dayN: Math.max(0, Math.min(currentDayN(), 75)),
       accent,
       name: S.profile.name,
@@ -2889,7 +2887,8 @@ function celebrateDay(date) {
     } else if (n % 7 === 0 && n < 75 && !S.reflections.some(r => r.week === n / 7)) {
       UI.sheet = { type: 'reflect', week: n / 7 };
     }
-    FX.sealDay(n, ms ? { milestone: ms[1], sub: ms[2] } : {}, () => evaluateAndRender());
+    const tier = ms ? (n === 7 ? 1 : n === 30 ? 2 : 3) : 0;
+    FX.sealDay(n, ms ? { milestone: ms[1], sub: ms[2], tier } : { tier }, () => evaluateAndRender());
     recordLifeLog();
     checkVictory();
     save();
@@ -2995,6 +2994,7 @@ setInterval(() => {
     if (el) el.textContent = countdownText();
   }
   checkReminders();
+  applyDaypart();
 }, 30000);
 
 document.addEventListener('visibilitychange', () => {
@@ -3016,6 +3016,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 window.__75 = { get state() { return S; }, save, render: renderApp };
 
 applyTheme();
+applyDaypart();
 if (navigator.storage && navigator.storage.persist) {
   navigator.storage.persist().catch(() => {});
 }

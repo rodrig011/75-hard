@@ -128,11 +128,16 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-html { height: 100%; overflow-x: hidden; }
+/* Fixed app shell — the page itself can never scroll or pan in any
+   direction; only .content scrolls. This is what stops iOS from
+   grabbing sideways gestures and wedging the viewport. */
+html { height: 100%; overflow: hidden; }
 
 body {
-  height: 100%;
-  overflow-x: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
@@ -186,6 +191,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   padding: calc(env(safe-area-inset-top, 0px) + 22px) 18px 32px;
 }
@@ -946,6 +953,8 @@ textarea.input { resize: none; }
 .sheet {
   width: 100%;
   max-width: 480px;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   -webkit-backdrop-filter: saturate(1.5) blur(28px);
   backdrop-filter: saturate(1.5) blur(28px);
@@ -1199,6 +1208,9 @@ textarea.input { resize: none; }
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   padding: calc(env(safe-area-inset-top, 0px) + 40px) 28px calc(env(safe-area-inset-bottom, 0px) + 24px);
 }
@@ -1641,7 +1653,7 @@ body::after {
   overflow: hidden;
   aspect-ratio: 3 / 4;
   background: var(--surface-2);
-  touch-action: none;
+  touch-action: pan-y;
 }
 .ba-under, .ba-top img {
   position: absolute; top: 0; left: 0;
@@ -1765,3 +1777,37 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ── The Chef ── */
+
+.chef-list { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
+.chef-card {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  padding: 15px 16px;
+}
+:root[data-theme="light"] .chef-card { background: var(--surface); }
+.chef-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.chef-head strong { font-size: 16.5px; letter-spacing: -0.01em; }
+.chef-kcal { font-weight: 800; white-space: nowrap; }
+.chef-kcal.ok { color: var(--green); }
+.chef-kcal.no { color: var(--t-diet); }
+.chef-have { font-size: 12.5px; font-weight: 600; color: var(--green); margin-top: 6px; }
+.chef-miss { font-size: 12.5px; font-weight: 600; color: var(--t-diet); margin-top: 6px; }
+.chef-warn {
+  font-size: 12.5px;
+  color: var(--red);
+  background: var(--red-dim);
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-top: 8px;
+}
+.chef-steps {
+  padding-left: 18px;
+  margin-top: 10px;
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.chef-card .small-log { margin-top: 12px; padding: 11px 16px; font-size: 14px; }

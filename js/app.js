@@ -102,6 +102,7 @@ function defaultState() {
     cheat: { allowance: 10, used: [] },
     myFoods: [],
     foodRecents: [],
+    fridge: '',
     reflections: [],
     milestonesSeen: [],
     lastBackup: null,
@@ -160,6 +161,7 @@ const UI = {
 
 /* Current rows shown in the food-search results list (local + web). */
 let FOOD_RESULTS = [];
+let CHEF_RESULTS = [];
 let offAbort = null;
 
 const proofURLs = new Map();
@@ -969,7 +971,10 @@ function renderTaskRow(date, me, t) {
           <div class="bar"><div class="bar-fill ${eaten > target ? 'over' : ''}" style="width:${Math.min(100, (eaten / target) * 100).toFixed(1)}%"></div></div>
           <div class="water-row">
             <span class="water-count">${eaten.toLocaleString()} <small>/ ${target.toLocaleString()} kcal</small></span>
-            <button class="chip" data-action="sheet" data-sheet="food" data-date="${date}">Log food</button>
+            <span class="chips">
+              <button class="chip" data-action="openChef" data-date="${date}">Chef</button>
+              <button class="chip" data-action="sheet" data-sheet="food" data-date="${date}">Log food</button>
+            </span>
           </div>
           ${(mm.p || mm.c || mm.f) ? `<div class="macro-row"><span>P <b>${Math.round(mm.p)}g</b></span><span>C <b>${Math.round(mm.c)}g</b></span><span>F <b>${Math.round(mm.f)}g</b></span></div>` : ''}` : `
           <div class="water-row">
@@ -1810,6 +1815,49 @@ function renderSheet() {
       <button class="btn ghost wide" data-action="closeSheet">Not now</button>`;
   }
 
+  if (sh.type === 'chef') {
+    const date = sh.date || todayStr();
+    const me = ensureDay(date).me;
+    const target = kcalTarget();
+    const left = target ? Math.max(0, target - kcalEaten(me)) : null;
+    const results = Chef.match(S.fridge)
+      .map(m => ({ ...m, comply: checkDietCompliance({ name: m.r.n + ' ' + m.r.i.join(' '), c: m.r.c }) }))
+      .sort((a, b) => (a.comply.flag ? 1 : 0) - (b.comply.flag ? 1 : 0));
+    CHEF_RESULTS = results;
+    inner = `
+      <div class="sheet-title serif">The Chef</div>
+      <p class="muted small">Tell it what's in the fridge — it finds real meals${left != null ? ` that fit the <b>${left.toLocaleString()} kcal</b> you have left today` : ''}. English or Spanish, all on your phone.</p>
+      <textarea class="input" id="fridgeText" rows="3" data-field="fridge"
+        placeholder="pollo, arroz, huevos, aguacate, queso…">${esc(S.fridge)}</textarea>
+      <button class="btn primary wide" data-action="chefFind">Find recipes</button>
+      ${results.length ? `
+        <div class="food-sect">From your fridge</div>
+        <ul class="chef-list">
+          ${results.map((m, idx) => {
+            const r = m.r;
+            let qty = 1;
+            if (left != null && r.k > left && left >= 220) qty = Math.max(0.5, Math.floor((left / r.k) * 2) / 2);
+            const fits = left == null || r.k * qty <= left;
+            const comply = m.comply;
+            return `
+              <li class="chef-card">
+                <div class="chef-head">
+                  <strong>${esc(r.n)}</strong>
+                  <span class="chef-kcal ${fits ? 'ok' : 'no'}">${Math.round(r.k * qty).toLocaleString()} kcal</span>
+                </div>
+                <div class="muted small">P${Math.round(r.p * qty)} · C${Math.round(r.c * qty)} · F${Math.round(r.f * qty)} · ${r.t} min${qty !== 1 ? ` · ${qty}× portion to fit your day` : ''}</div>
+                ${m.missing.length ? `<div class="chef-miss">Missing: ${m.missing.map(esc).join(', ')}</div>` : `<div class="chef-have">You have everything.</div>`}
+                ${comply.flag ? `<div class="chef-warn">${esc(comply.reason)}</div>` : ''}
+                <ol class="chef-steps">${r.s.map(st => `<li>${esc(st)}</li>`).join('')}</ol>
+                <button class="btn ghost wide small-log" data-action="chefLog" data-idx="${idx}" data-qty="${qty}" data-date="${esc(date)}">
+                  Cook it — log ${qty !== 1 ? qty + '× ' : ''}to ${MEALS[UI.foodMeal || 0]}
+                </button>
+              </li>`;
+          }).join('')}
+        </ul>` : (S.fridge.trim() ? `<p class="food-empty">Nothing matches yet — add a protein (chicken, eggs, tuna…) and a base (rice, tortilla, potato…).</p>` : '')}
+      <button class="btn ghost wide" data-action="backToFood" data-date="${esc(date)}">Back to the log</button>`;
+  }
+
   if (sh.type === 'legacy') {
     const MOOD_WORDS = { 1: 'A rough one', 2: 'A low day', 3: 'Steady', 4: 'A good day', 5: 'Strong' };
     const dayN = Math.max(1, Math.min(currentDayN(), 75));
@@ -2002,9 +2050,17 @@ function updateFoodResults(webRows) {
 
   if (q.length < 2) {
     FOOD_RESULTS = (S.foodRecents || []).slice(0, 8);
-    box.innerHTML = FOOD_RESULTS.length
+    const chefRow = `
+      <li>
+        <button class="food-result" data-action="openChef">
+          <span class="fr-add">${icon('fork')}</span>
+          <span class="fr-body"><span class="fr-name">Cook from your fridge</span>
+          <span class="fr-sub">The Chef — real meals that fit today's calories</span></span>
+        </button>
+      </li>`;
+    box.innerHTML = chefRow + (FOOD_RESULTS.length
       ? `<div class="food-sect">Recent</div>` + FOOD_RESULTS.map(foodResultRow).join('')
-      : `<p class="food-empty">Search the built-in food library, or your own saved foods. Recents will appear here.</p>`;
+      : `<p class="food-empty">Search the built-in food library, or your own saved foods. Recents will appear here.</p>`);
     return;
   }
 
@@ -2419,6 +2475,30 @@ const ACTIONS = {
     save();
     renderApp();
   },
+  chefFind() {
+    const el = $('#fridgeText');
+    if (el) S.fridge = el.value.slice(0, 400);
+    save();
+    renderApp();
+    if (!Chef.match(S.fridge).length && S.fridge.trim()) {
+      showToast('Add a protein and a base — chicken and rice, eggs and tortilla…');
+    }
+  },
+  chefLog(d) {
+    const m = CHEF_RESULTS[Number(d.idx)];
+    if (!m) return;
+    const qty = Number(d.qty) || 1;
+    UI.sheet = { type: 'food', date: d.date };
+    tryLogFood(d.date, {
+      name: m.r.n, serving: '1 serving', qty,
+      kcal: m.r.k, p: m.r.p, c: m.r.c, f: m.r.f,
+    });
+  },
+  backToFood(d) { UI.sheet = { type: 'food', date: d.date }; renderApp(); },
+  openChef(d) {
+    UI.sheet = { type: 'chef', date: (UI.sheet && UI.sheet.date) || d.date || todayStr() };
+    renderApp();
+  },
   showCustomFood() { UI.foodCustomOpen = true; renderApp(); },
   hideCustomFood() { UI.foodCustomOpen = false; renderApp(); },
   saveCustomFood(d) {
@@ -2826,7 +2906,7 @@ const ACTIONS = {
 function doLogFood(date, food) {
   const day = ensureDay(date);
   day.me.food.push({
-    id: uid(), name: food.name, serving: food.serving, qty: 1,
+    id: uid(), name: food.name, serving: food.serving, qty: food.qty || 1,
     kcal: Math.round(food.kcal), p: food.p || 0, c: food.c || 0, f: food.f || 0,
     meal: MEALS[UI.foodMeal || 0],
   });
@@ -2946,6 +3026,7 @@ document.addEventListener('change', e => {
   if (f === 'dietName') S.profile.dietName = el.value.trim().slice(0, 30);
   if (f === 'why') S.profile.why = el.value.trim().slice(0, 140);
   if (f === 'bannedWords') S.settings.bannedWords = el.value.trim().slice(0, 200);
+  if (f === 'fridge') S.fridge = el.value.slice(0, 400);
   save();
 });
 

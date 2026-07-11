@@ -106,11 +106,12 @@ function defaultState() {
     milestonesSeen: [],
     lastBackup: null,
     customTasks: [],
+    lifeLog: {},
     settings: {
       strictProof: true, waterGoalOz: 128, pagesGoal: 10, installHintDismissed: false,
       nutrition: null, challengeMode: 'hard', theme: 'system',
       reminders: { on: false, am: '08:00', pm: '18:30' },
-      bannedWords: '',
+      bannedWords: '', sound: true, accent: 'volt',
     },
   };
 }
@@ -347,9 +348,51 @@ function currentChain() {
 }
 
 const MILESTONES = [
-  [10, 'Ten days.', 'The habit is forming. Most people never see this number.'],
-  [25, 'Twenty-five.', 'A third of the way. This is starting to look like who you are.'],
-  [50, 'Fifty.', 'The doubters went quiet around day thirty. Twenty-five to go.'],
+  [7, 'One week.', 'Seven days without a single excuse. The chain has begun.'],
+  [30, 'Thirty.', 'A month of kept promises. Most people quit by day five.'],
+  [50, 'Fifty.', 'Two thirds through. The person in the Day 1 photo would not recognize you.'],
+];
+
+/* ── Lifetime record / discipline score ── */
+
+const LEVELS = [
+  [0, 'Beginner'], [100, 'Committed'], [300, 'Disciplined'],
+  [700, 'Relentless'], [1250, 'Unbreakable'], [2000, 'Legend'],
+];
+
+function recordLifeLog() {
+  if (!S.onboarded) return;
+  const today = todayStr();
+  const start = startDate();
+  const last = Math.min(diffDays(start, today), 74);
+  for (let i = 0; i <= last; i++) {
+    const date = addDays(start, i);
+    if (diffDays(date, today) < 0) break;
+    const f = dayComplete(date) ? 1 : doneCount(date, 'me') / activeTasksFor(date).length;
+    if (!S.lifeLog) S.lifeLog = {};
+    if ((S.lifeLog[date] || 0) < f) S.lifeLog[date] = Math.round(f * 100) / 100;
+  }
+}
+
+function lifetimeStats() {
+  const log = S.lifeLog || {};
+  const sealed = Object.values(log).filter(v => v >= 1).length;
+  const completions = S.history.filter(h => /Completed/.test(h.note || '')).length;
+  const score = sealed * 10 + completions * 500 + currentChain() * 5;
+  let level = LEVELS[0][1], next = null;
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (score >= LEVELS[i][0]) level = LEVELS[i][1];
+    else { next = LEVELS[i]; break; }
+  }
+  return { sealed, completions, score, level, next };
+}
+
+const ACCENTS = [
+  ['volt', 'Volt', 0],
+  ['ember', 'Ember', 7],
+  ['ocean', 'Ocean', 30],
+  ['royal', 'Royal', 50],
+  ['legend', 'Legend', 75],
 ];
 
 /* ── Theme ── */
@@ -358,6 +401,10 @@ function applyTheme() {
   const t = S.settings.theme || 'dark';
   if (t === 'light' || t === 'hardcore') document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  const a = S.settings.accent || 'volt';
+  if (a === 'volt') delete document.documentElement.dataset.accent;
+  else document.documentElement.dataset.accent = a;
+  if (typeof FX !== 'undefined') FX.setEnabled(S.settings.sound !== false);
 }
 
 function doneCount(date, who) {
@@ -768,24 +815,25 @@ function renderToday() {
         <span><strong>Yesterday slipped.</strong> It's recorded — today is what counts.</span>
         <button class="btn small ghost" data-action="fixYesterday" data-date="${yesterday}">Fix the log</button>
       </div>` : ''}
-    <header class="appheader">
-      <div class="header-row">
-        <div>
-          <div class="kicker">${prettyDate(editDate)} · Attempt ${roman(S.attempt.n)}</div>
+    <section class="hero-card ${allDone ? 'is-sealed' : ''}">
+      <div class="kicker">${prettyDate(editDate)} · Attempt ${roman(S.attempt.n)}</div>
+      <div class="hero-mid">
+        <div class="hero-left">
           <h1 class="serif hero-num">Day ${dayN}</h1>
-          <div class="muted">${allDone ? 'Everything is done. Sealed.' : `${done} of ${dayTasks.length} complete · <span id="countdown">${countdownText()}</span>`}</div>
-          ${currentChain() >= 2 ? `<div class="chain-line">${icon('seal')} ${currentChain()}-day chain — don't break it</div>` : ''}
+          <div class="muted hero-status">${allDone ? 'Everything is done.<br>Sealed.' : `${done} of ${dayTasks.length} complete<br><span id="countdown">${countdownText()}</span>`}</div>
+          ${currentChain() >= 2 ? `<div class="chain-line">${icon('seal')} ${currentChain()}-day chain</div>` : ''}
         </div>
-        <div class="ring-wrap" aria-hidden="true">
+        <div class="ring-wrap hero-ring" aria-hidden="true">
           <svg class="ring" viewBox="0 0 120 120">
             <circle class="ring-track" cx="60" cy="60" r="${R}"/>
             <circle class="ring-fill" cx="60" cy="60" r="${R}"
               stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/>
           </svg>
-          <div class="ring-label"><span class="serif">${dayN}</span><small>of 75</small></div>
+          <div class="ring-label"><span class="serif">${done}/${dayTasks.length}</span><small>today</small></div>
         </div>
       </div>
-    </header>
+      ${S.profile.why ? `<p class="hero-why">“${esc(S.profile.why)}”</p>` : ''}
+    </section>
     ${installHint}
     ${sealed ? `
       <div class="card seal-card">
@@ -803,13 +851,17 @@ function renderToday() {
           <p class="muted small">Waiting on ${esc(S.profile.partnerName || 'your partner')} — the day seals when you both finish.</p>
         </div>
       </div>` : ''}
-    ${S.profile.why ? `<div class="why-card"><span class="kicker">Your why</span><p class="serif">“${esc(S.profile.why)}”</p></div>` : ''}
     <ul class="tasklist">
       ${dayTasks.map(t => renderTaskRow(editDate, me, t)).join('')}
     </ul>
     <div class="card journal-card">
       <div class="card-head"><strong>Tonight's page</strong><span class="muted small">just for you</span></div>
       <textarea class="input" data-journal="${editDate}" rows="3" placeholder="How did the day actually go?">${esc(me.note || '')}</textarea>
+      <div class="weight-row">
+        <label class="muted small" for="dayWeight">Weight today (optional)</label>
+        <input class="input slim" id="dayWeight" type="number" inputmode="decimal" placeholder="—"
+          data-weight="${editDate}" value="${me.weight || ''}" min="50" max="700"> <span class="muted small">lb</span>
+      </div>
     </div>
     <p class="footnote">${isFlex() ? 'A missed day is recorded, never erased. Show up anyway.' : 'Miss a single item and the count returns to zero. The rules are the rules.'}</p>`;
 }
@@ -972,11 +1024,22 @@ function renderJourney() {
   const totalPages = S.books.reduce((a, b) => a + (b.pagesRead || 0), 0);
   const sealedDays = countSealedDays();
 
+  const life = lifetimeStats();
+  const nextPct = life.next ? Math.min(100, (life.score / life.next[0]) * 100) : 100;
+
   return `
     <header class="appheader">
       <div class="kicker">The record</div>
       <h1 class="serif page-title">Journey</h1>
     </header>
+    <div class="card score-card">
+      <div class="card-head"><strong>Discipline Score</strong><span class="badge-gold">${esc(life.level)}</span></div>
+      <div class="score-num serif">${life.score.toLocaleString()}</div>
+      <div class="bar"><div class="bar-fill" style="width:${nextPct.toFixed(1)}%"></div></div>
+      <p class="muted small" style="margin-top:8px">${life.next
+        ? `${(life.next[0] - life.score).toLocaleString()} points to ${life.next[1]}. Every sealed day is 10; a finished 75 is 500.`
+        : 'The top of the mountain. Stay there.'}</p>
+    </div>
     <div class="card">
       <div class="grid75">${cells}</div>
       <div class="grid-legend">
@@ -992,7 +1055,13 @@ function renderJourney() {
       <div class="stat"><div class="stat-v serif" style="color:var(--gold)">${cheatRemaining('me')}</div><div class="stat-l">Passes left</div></div>
       <div class="stat"><div class="stat-v serif" style="color:var(--t-read)">${totalPages}</div><div class="stat-l">Pages read</div></div>
     </div>
+    ${renderCoach()}
     ${renderNutriInsights()}
+    ${renderYearHeatmap()}
+    <div class="duo">
+      <button class="btn primary" data-action="shareCardBtn">${icon('share')} Share my card</button>
+      <button class="btn ghost" data-action="sheet" data-sheet="legacy">Legacy timeline</button>
+    </div>
     <div class="card">
       <div class="card-head"><strong>Milestones</strong></div>
       <div class="medals">
@@ -1003,6 +1072,7 @@ function renderJourney() {
           </div>`).join('')}
       </div>
     </div>
+    ${renderTrophyRoom()}
     ${S.reflections.length ? `
       <div class="card">
         <div class="card-head"><strong>Weekly reflections</strong></div>
@@ -1069,6 +1139,144 @@ function renderNutriInsights() {
       </div>
       ${target ? `<p class="muted small">Average ${avg.toLocaleString()} kcal against a ${target.toLocaleString()} target. Tap a day to see its plate.</p>`
         : `<p class="muted small">Tap a day to see its plate. Set a calorie target in More for the full picture.</p>`}
+    </div>`;
+}
+
+/* Rule-based coach — pattern insights over the current attempt. */
+function renderCoach() {
+  const today = todayStr();
+  const dayN = Math.min(currentDayN(), 75);
+  if (dayN < 5) return '';
+  const insights = [];
+
+  const missCounts = {};
+  let pastDays = 0;
+  for (let i = 1; i < dayN; i++) {
+    const date = addDays(startDate(), i - 1);
+    pastDays++;
+    missedTasks(date, 'me').forEach(t => { missCounts[t.title] = (missCounts[t.title] || 0) + 1; });
+  }
+  const worst = Object.entries(missCounts).sort((a, b) => b[1] - a[1])[0];
+  if (worst && worst[1] >= 2) {
+    insights.push(`“${worst[0]}” is the task that slips most (${worst[1]} times). Schedule it before noon and it stops slipping.`);
+  }
+
+  const weekday = {};
+  for (let i = 1; i < dayN; i++) {
+    const date = addDays(startDate(), i - 1);
+    const d = parseDate(date).toLocaleDateString('en-US', { weekday: 'long' });
+    if (!weekday[d]) weekday[d] = [0, 0];
+    weekday[d][1]++;
+    if (dayComplete(date)) weekday[d][0]++;
+  }
+  const days = Object.entries(weekday).filter(([, v]) => v[1] >= 2);
+  if (days.length >= 3) {
+    const hard = days.sort((a, b) => a[1][0] / a[1][1] - b[1][0] / b[1][1])[0];
+    if (hard && hard[1][0] < hard[1][1]) {
+      insights.push(`${hard[0]}s are your weak spot — ${hard[1][0]} of ${hard[1][1]} sealed. Plan those the night before.`);
+    }
+  }
+
+  const target = kcalTarget();
+  if (target) {
+    let over = 0, logged = 0;
+    for (let i = Math.max(1, dayN - 7); i <= dayN; i++) {
+      const me = getDay(addDays(startDate(), i - 1)).me;
+      if (me && (me.food || []).length) { logged++; if (kcalEaten(me) > target) over++; }
+    }
+    if (logged >= 3 && over >= 2) insights.push(`You went over your ${target.toLocaleString()} kcal target ${over} of the last ${logged} logged days — dinner is usually where it happens.`);
+    else if (logged >= 3 && over === 0) insights.push(`Every logged day this week landed under your calorie target. That's how the photo changes.`);
+  }
+
+  const weights = [];
+  for (let i = 1; i <= dayN; i++) {
+    const me = getDay(addDays(startDate(), i - 1)).me;
+    if (me && me.weight) weights.push(me.weight);
+  }
+  if (weights.length >= 4) {
+    const delta = Math.round((weights[weights.length - 1] - weights[0]) * 10) / 10;
+    if (Math.abs(delta) >= 1) insights.push(`${Math.abs(delta)} lb ${delta < 0 ? 'down' : 'up'} since Day 1. The proof is on the scale too.`);
+  }
+
+  if (!insights.length && pastDays >= 5 && currentChain() >= 5) {
+    insights.push(`${currentChain()} clean days in a row and no weak pattern to report. Boring is what winning looks like.`);
+  }
+  if (!insights.length) return '';
+  return `
+    <div class="card">
+      <div class="card-head"><strong>Coach</strong><span class="muted small">patterns in your data</span></div>
+      <ul class="coach-list">${insights.slice(0, 3).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+    </div>`;
+}
+
+/* GitHub-style heatmap of the last 26 weeks, across all attempts. */
+function renderYearHeatmap() {
+  const log = S.lifeLog || {};
+  if (!Object.keys(log).length) return '';
+  const today = todayStr();
+  const cols = [];
+  const todayD = parseDate(today);
+  const end = new Date(todayD);
+  end.setDate(end.getDate() + (6 - end.getDay()));
+  for (let w = 25; w >= 0; w--) {
+    let col = '';
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(end);
+      dt.setDate(dt.getDate() - w * 7 - (6 - d));
+      const key = fmtDate(dt);
+      const v = dt > todayD ? -1 : (log[key] || 0);
+      const cls = v < 0 ? 'hx' : v >= 1 ? 'h3' : v >= 0.5 ? 'h2' : v > 0 ? 'h1' : 'h0';
+      col += `<i class="${cls}"></i>`;
+    }
+    cols.push(`<div class="hm-col">${col}</div>`);
+  }
+  return `
+    <div class="card">
+      <div class="card-head"><strong>Six months of showing up</strong><span class="muted small">every attempt counts</span></div>
+      <div class="hm-grid">${cols.join('')}</div>
+      <div class="grid-legend" style="margin-top:10px">
+        <span><i class="dot" style="background:var(--surface-2)"></i>Nothing</span>
+        <span><i class="dot" style="background:color-mix(in srgb, var(--green) 35%, transparent)"></i>Partial</span>
+        <span><i class="dot done"></i>Sealed</span>
+      </div>
+    </div>`;
+}
+
+function renderTrophyRoom() {
+  const life = lifetimeStats();
+  const finishedBooks = S.books.filter(b => b.done).length;
+  const totalPages = S.books.reduce((a, b) => a + (b.pagesRead || 0), 0);
+  const completedRuns = S.history.filter(h => /Completed/.test(h.note || ''));
+  const trophies = [
+    ['First Seal', 'Seal one day', life.sealed >= 1],
+    ['One Week', '7 days sealed', life.sealed >= 7],
+    ['Iron Month', '30 days sealed', life.sealed >= 30],
+    ['Half Century', '50 days sealed', life.sealed >= 50],
+    ['The 75', 'Finish a full run', life.completions >= 1],
+    ['Chainsmith', 'A 14-day chain', currentChain() >= 14],
+    ['Bookworm', 'Finish a book', finishedBooks >= 1],
+    ['Scholar', '500 pages read', totalPages >= 500],
+  ];
+  return `
+    <div class="card">
+      <div class="card-head"><strong>Trophy Room</strong><span class="muted small">${trophies.filter(t => t[2]).length} of ${trophies.length}</span></div>
+      ${completedRuns.length ? `
+        <div class="sanctuary">
+          ${completedRuns.map(h => `
+            <div class="plaque">
+              <div class="plaque-num serif">75</div>
+              <div><strong>Attempt ${roman(h.n)}</strong>
+              <div class="muted small">${shortDate(h.start)} — ${shortDate(h.end)}</div></div>
+            </div>`).join('')}
+        </div>` : ''}
+      <div class="trophies">
+        ${trophies.map(([name, how, earned]) => `
+          <div class="trophy ${earned ? 'earned' : ''}">
+            <div class="trophy-cup">${icon('seal')}</div>
+            <strong>${name}</strong>
+            <span>${how}</span>
+          </div>`).join('')}
+      </div>
     </div>`;
 }
 
@@ -1218,6 +1426,20 @@ function renderMore() {
         }).join('')}
       </div>
       <p class="muted small" style="margin-top:10px">Dark is the signature look. Hardcore is black and gold — no softness anywhere.</p>
+      <div class="row-setting">
+        <div><strong>Accent</strong><div class="muted small">New colors unlock as your lifetime sealed days grow.</div></div>
+        <div class="accent-row">
+          ${ACCENTS.map(([id, label, need]) => {
+            const unlocked = lifetimeStats().sealed >= need;
+            const cur = S.settings.accent || 'volt';
+            return `<button class="accent-dot a-${id} ${cur === id ? 'on' : ''} ${unlocked ? '' : 'locked'}" data-action="setAccent" data-v="${id}" aria-label="${label}">${unlocked ? '' : need}</button>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="row-setting">
+        <div><strong>Sound &amp; haptics</strong><div class="muted small">Ticks, fanfares, and the seal coin.</div></div>
+        <button class="switch ${S.settings.sound !== false ? 'on' : ''}" data-action="toggleSound" role="switch" aria-checked="${S.settings.sound !== false}"><i></i></button>
+      </div>
     </div>
 
     <div class="card">
@@ -1624,6 +1846,38 @@ function renderSheet() {
       <button class="btn ghost wide" data-action="closeSheet">Not now</button>`;
   }
 
+  if (sh.type === 'legacy') {
+    const dayN = Math.max(1, Math.min(currentDayN(), 75));
+    const rows = [];
+    for (let i = dayN; i >= 1; i--) {
+      const date = addDays(startDate(), i - 1);
+      const me = getDay(date).me;
+      if (!me) continue;
+      const pid = me.proofs && me.proofs.photo;
+      const meta = [
+        me.weight ? `${me.weight} lb` : '',
+        (me.food || []).length ? `${kcalEaten(me).toLocaleString()} kcal` : '',
+        me.pages ? `${me.pages} pp` : '',
+        me.water ? `${me.water} oz` : '',
+      ].filter(Boolean).join(' · ');
+      rows.push(`
+        <li class="tl-row">
+          <div class="tl-day ${dayComplete(date) ? 'done' : ''}"><span class="serif">${i}</span></div>
+          <div class="tl-body">
+            <div class="tl-date">${prettyDate(date)}</div>
+            ${meta ? `<div class="muted small">${meta}</div>` : ''}
+            ${me.note ? `<div class="tl-note">${esc(me.note)}</div>` : ''}
+          </div>
+          ${pid ? `<img class="tl-photo" data-proof-src="${esc(pid)}" alt="">` : ''}
+        </li>`);
+    }
+    inner = `
+      <div class="sheet-title serif">Legacy — Attempt ${roman(S.attempt.n)}</div>
+      <p class="muted small">Every day of this run: pictures, notes, weight, fuel.</p>
+      <ul class="tl">${rows.join('')}</ul>
+      <button class="btn ghost wide" data-action="closeSheet">Close</button>`;
+  }
+
   if (sh.type === 'confirm') {
     inner = `
       <div class="sheet-title serif">${esc(sh.title)}</div>
@@ -1685,15 +1939,40 @@ function hydrateGallery() {
       const a = photos[0], b = photos[photos.length - 1];
       tf.hidden = false;
       tf.innerHTML = `
-        <div class="card-head"><strong>The change</strong><span class="muted small">${photos.length} pictures</span></div>
-        <div class="transform">
-          <figure><img data-proof-src="${esc(a.id)}" alt=""><figcaption>Day ${dayNumberOf(a.date)}</figcaption></figure>
-          <figure><img data-proof-src="${esc(b.id)}" alt=""><figcaption>Day ${dayNumberOf(b.date)}</figcaption></figure>
+        <div class="card-head"><strong>The change</strong><span class="muted small">drag to compare</span></div>
+        <div class="ba-wrap">
+          <img class="ba-under" data-proof-src="${esc(b.id)}" alt="">
+          <div class="ba-top"><img data-proof-src="${esc(a.id)}" alt=""></div>
+          <div class="ba-line"><i></i></div>
+          <input class="ba-range" type="range" min="0" max="100" value="50" aria-label="Compare Day ${dayNumberOf(a.date)} and Day ${dayNumberOf(b.date)}">
+          <span class="ba-tag l">Day ${dayNumberOf(a.date)}</span>
+          <span class="ba-tag r">Day ${dayNumberOf(b.date)}</span>
         </div>
-        <button class="btn ghost wide" data-action="playLapse">Play the reel</button>`;
+        <div class="duo" style="margin-top:14px">
+          <button class="btn ghost" data-action="playLapse">Play the reel</button>
+          ${FX.filmSupported() ? `<button class="btn ghost" data-action="exportFilmBtn">Export the film</button>` : `<span></span>`}
+        </div>`;
       fillProofImgs(tf);
+      wireBASlider(tf.querySelector('.ba-wrap'));
     }
   });
+}
+
+function wireBASlider(wrap) {
+  if (!wrap) return;
+  const top = wrap.querySelector('.ba-top');
+  const topImg = top.querySelector('img');
+  const line = wrap.querySelector('.ba-line');
+  const range = wrap.querySelector('.ba-range');
+  const sync = () => { topImg.style.width = wrap.clientWidth + 'px'; };
+  const move = v => {
+    top.style.width = v + '%';
+    line.style.left = v + '%';
+  };
+  range.addEventListener('input', () => move(range.value));
+  new ResizeObserver(sync).observe(wrap);
+  sync();
+  move(50);
 }
 
 /* Full-screen time-lapse of progress pictures */
@@ -2007,7 +2286,7 @@ const ACTIONS = {
   },
 
   /* checklist */
-  toggle(d) {
+  toggle(d, el) {
     const date = d.date, taskId = d.task;
     const t = activeTasksFor(date).find(x => x.id === taskId);
     if (!t) return;
@@ -2036,16 +2315,22 @@ const ACTIONS = {
     } else {
       me.checks[taskId] = !me.checks[taskId];
     }
+    if (!done && taskDone(date, 'me', t) && el) {
+      FX.tick();
+      const li = el.closest('.task');
+      FX.burst(el, li ? getComputedStyle(li).getPropertyValue('--tint').trim() : null);
+    }
     save();
     evaluateAndRender();
     const now = personDone(date, 'me');
     if (now && !done) celebrateDay(date);
   },
 
-  water(d) {
+  water(d, el) {
     const day = ensureDay(d.date);
     const before = taskDone(d.date, 'me', TASKS.find(t => t.type === 'water'));
     day.me.water = Math.max(0, Math.min(999, day.me.water + Number(d.oz)));
+    if (!before && day.me.water >= S.settings.waterGoalOz && el) { FX.tick(); FX.burst(el, 'var(--t-water)'); }
     save();
     evaluateAndRender();
     if (!before && day.me.water >= S.settings.waterGoalOz) showToast('A full gallon. Well done.');
@@ -2342,6 +2627,59 @@ const ACTIONS = {
       openTimelapse(photos);
     });
   },
+  shareCardBtn() {
+    const life = lifetimeStats();
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--green').trim();
+    const totalPages = S.books.reduce((a, b) => a + (b.pagesRead || 0), 0);
+    FX.shareCard({
+      dayN: Math.max(0, Math.min(currentDayN(), 75)),
+      accent,
+      name: S.profile.name,
+      title: currentChain() >= 2 ? `${currentChain()}-day chain.` : 'Still standing.',
+      quote: S.profile.why,
+      kicker: `SEVENTY-FIVE · ATTEMPT ${roman(S.attempt.n)}`,
+      stats: [
+        { v: String(life.sealed), l: 'days sealed', color: accent },
+        { v: String(currentChain()), l: 'chain', color: '#ff9d0a' },
+        { v: String(totalPages), l: 'pages read', color: '#c084f5' },
+        { v: life.score.toLocaleString(), l: 'discipline', color: '#e9d5a6' },
+      ],
+    }).then(blob => shareBlob(blob, 'seventyfive-card.png', 'image/png'));
+  },
+  exportFilmBtn() {
+    myPhotos().then(async photos => {
+      if (photos.length < 2) { showToast('Two or more pictures make a film.'); return; }
+      showToast('Rendering your film — hold on a few seconds…');
+      const frames = [];
+      for (const p of photos) {
+        const url = await proofURL(p.id);
+        if (url) frames.push({ url, label: `DAY ${dayNumberOf(p.date)}` });
+      }
+      try {
+        const blob = await FX.exportFilm(frames);
+        shareBlob(blob, `seventyfive-transformation.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`, blob.type);
+      } catch {
+        showToast('This device cannot render video — the reel still plays.');
+      }
+    });
+  },
+  setAccent(d) {
+    const acc = ACCENTS.find(a => a[0] === d.v);
+    if (!acc) return;
+    const life = lifetimeStats();
+    if (life.sealed < acc[2]) { showToast(`“${acc[1]}” unlocks at ${acc[2]} lifetime sealed days.`); return; }
+    S.settings.accent = d.v;
+    save();
+    applyTheme();
+    renderApp();
+    showToast(`${acc[1]} equipped.`);
+  },
+  toggleSound() {
+    S.settings.sound = S.settings.sound === false;
+    save();
+    applyTheme();
+    renderApp();
+  },
 
   /* books */
   addBook() {
@@ -2518,6 +2856,21 @@ function pushRecentFood(r) {
   if (S.foodRecents.length > 14) S.foodRecents.length = 14;
 }
 
+function shareBlob(blob, filename, type) {
+  const file = new File([blob], filename, { type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file] }).catch(() => {});
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    showToast('Saved to your downloads.');
+  }
+}
+
 function nudgeProof(date, taskId) {
   showToast('Proof first — attach the photo, then check it off.');
   const btn = document.querySelector(`.proof-btn[data-date="${date}"][data-task="${taskId}"]`);
@@ -2527,7 +2880,6 @@ function nudgeProof(date, taskId) {
 function celebrateDay(date) {
   if (dayComplete(date)) {
     const n = dayNumberOf(date);
-    showToast(`Day ${n} sealed.`);
     if (UI.fixing === date) UI.fixing = null;
     const ms = MILESTONES.find(m => m[0] === n);
     if (ms && !S.milestonesSeen.includes(n)) {
@@ -2537,6 +2889,11 @@ function celebrateDay(date) {
     } else if (n % 7 === 0 && n < 75 && !S.reflections.some(r => r.week === n / 7)) {
       UI.sheet = { type: 'reflect', week: n / 7 };
     }
+    FX.sealDay(n, ms ? { milestone: ms[1], sub: ms[2] } : {}, () => evaluateAndRender());
+    recordLifeLog();
+    checkVictory();
+    save();
+    return;
   } else if (isCouple() && S.profile.coupleRule === 'together') {
     showToast(`Your side is done — waiting on ${S.profile.partnerName || 'your partner'}.`);
   }
@@ -2544,6 +2901,7 @@ function celebrateDay(date) {
 }
 
 function evaluateAndRender() {
+  recordLifeLog();
   checkVictory();
   renderApp();
 }
@@ -2564,6 +2922,14 @@ document.addEventListener('change', e => {
   if (journal) {
     const day = ensureDay(journal.dataset.journal);
     day.me.note = journal.value.slice(0, 2000);
+    save();
+    return;
+  }
+  const wEl = e.target.closest('[data-weight]');
+  if (wEl) {
+    const day = ensureDay(wEl.dataset.weight);
+    const v = parseFloat(wEl.value);
+    day.me.weight = v >= 50 && v <= 700 ? Math.round(v * 10) / 10 : null;
     save();
     return;
   }
